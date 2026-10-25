@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+
+# Build and test output
+dist/
+coverage/
+*.tsbuildinfo
+
+# pi-testmode runtime data (docs/pi-testmode-plan.md §5); scope.json is human-maintained, keep it
+.pi/testmode/*
+!.pi/testmode/scope.json
+
+# SQLite
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Logs and temp files
+*.log
+npm-debug.log*
+tmp/
+
+# Claude Code personal settings and worktrees
+.claude/settings.local.json
+.claude/worktrees/
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
