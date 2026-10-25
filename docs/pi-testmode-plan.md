@@ -16,7 +16,7 @@
 
 **成功标准**（全部可在仓库内的靶场 SUT `canary/` 上复现）：
 
-1. **M1**：测试意图能派发 Mission，主会话进入待命；Mission 完成后自动唤醒主会话出报告。报告中的缺陷都经过独立复验。
+1. **M1**：测试意图能派发 Mission，主会话进入待命；Mission 完成后自动唤醒主会话出报告。报告中的缺陷都经过独立复验。进程崩溃或网络中断后，Mission 可以恢复，且不会重复执行已完成的副作用。
 2. **M2**：第二次提出同类意图时，命中模板（H2/H3），Token 成本 ≤ 首次的 50%。主会话上下文中从不出现任何能力正文。
 3. **M3**：靶场切换为最终一致模式后，误报产生的是一条**例外**，而不是模板被改写或删除；原有基石案例的判定保持不变。
 
@@ -43,6 +43,9 @@
 | MCP 暴露级别 | `exposure: direct \| codemode \| deferred \| hidden`；工具名为 `mcp__<server>__<tool>`；`deferred` 由 `tool_search` 按需声明 | D3 渐进披露 |
 | 嵌套调用 | `ctx.modelRegistry.streamSimple(model, context)`：单次 LLM 调用。`ctx.executeTool(name, args)`：嵌套工具调用，同样经过 `tool_call` / `tool_result` 闸门 | 归因与提议；复用内置工具 |
 | 会话存储 | `SessionManager.create(cwd, sessionDir)`（JSONL）/ `SessionManager.inMemory()`；`SettingsManager.inMemory()`、`applyOverrides()` | Mission 对话记录 |
+| 会话持久化与恢复 | 每条记录**同步**追加写入 JSONL（`appendFileSync`），加载时跳过损坏行（比如崩溃时只写了一半的末行）。**只有出现第一对 user + assistant 消息后才会首次落盘**。用 `SessionManager.open(path)` 重新打开，用 `branch(entryId)` 回退叶子；`appendMessage()` 可写入 toolResult | 崩溃恢复（M1-14） |
+| 孤儿工具调用 | pi-ai 发请求前，会给"有调用、无结果"的调用自动补一条 `No result provided` 的错误结果；`stopReason` 为 error 或 aborted 的 assistant 消息不会被重放 | 恢复后请求不报错，但模型可能重跑该调用（见 M1-14） |
+| 网络重试 | `retry.enabled`（默认 true）、`retry.maxRetries`（默认 3）、指数退避（`baseDelayMs` 2000，`maxAgentDelayMs` 60000）；`retry.provider.maxRetries` 默认 0 | 应对 LLM 服务商的瞬时故障 |
 | Skills | 遵循 Agent Skills 标准。系统提示只放 name、description、路径，正文由模型用 `read` 按需读取 | 能力封装 |
 | 测试替身 | `@earendil-works/pi-ai`：`fauxProvider()`、`fauxAssistantMessage`、`fauxToolCall`、`fauxText` | 确定性 e2e |
 | 运行时 | Node ≥ 22.19；Windows 上内置 `powershell` 工具 | — |
@@ -89,7 +92,7 @@
 | 候选 | 不用的原因 |
 |---|---|
 | 官方 `subagent/` 的运行器 | 每次调用都起一个 `pi` 子进程，**阻塞**到子进程结束，不满足"派发后待命"；也无法注入内联策略扩展和共享 DB 句柄。改用 SDK 的 `createAgentSession`（同为官方 API） |
-| `@earendil-works/pi-durable` | 后台子代理和任务图很契合，但它是**另一个宿主**（不是 pi CLI 扩展），README 标注 *Experimental, API changes without notice*。作为未来迁移选项记录 |
+| `@earendil-works/pi-durable` | 后台子代理和任务图很契合，但它是**另一个宿主**，不是 pi CLI 扩展，README 也标注 *Experimental, API changes without notice*。崩溃恢复改由 pi 会话持久化加上本包的状态机和副作用日志实现（M1-14，I-8），runner 放在接口后面以便将来迁移（I-9） |
 | `@earendil-works/pi-session-backend-sqlite-node` / `pi-storage-sqlite-node` | 用途是 pi-agent-core 的**会话**存储，不是通用知识库；后者停在 0.83。知识库直接用 `node:sqlite` |
 | `gondolin/` 示例（micro-VM） | 只支持 macOS/Linux（QEMU / krun），与 Windows 环境不符；Linux 用户可作为替代沙箱 |
 | 社区包 `pi-subagents`、`pi-mcp-adapter`、`pi-web-access` | 非官方。`pi-mcp-adapter` 已被内置 MCP 取代 |
@@ -117,6 +120,7 @@
 | 原始输出 D4 | bash 自带截断加全文文件；codemode 脚本内部过滤；证据文件按 sha256 存放 |
 | 判决可执行化（§10.3 第 10 条） | 判决只能来自 `test_run` 的退出码和断言输出 |
 | 知识库 K | SQLite：`project.db`，并 ATTACH `global.db` |
+| 崩溃恢复 | pi 会话 JSONL（续跑），加上本包的 `missions` 状态机、`tool_journal`（副作用至多执行一次）和通知发件箱（M1-14） |
 | OS 隔离 | macOS/Linux：改编的 sandbox 扩展。Windows：只有工具层策略，并在报告中写明隔离级别；建议改用官方 Docker 方案运行 pi |
 
 ---
@@ -132,6 +136,8 @@
 | I-5 | 适用判定、风险分级、门禁、分诊规则、指标计算都写成**确定性纯函数**。LLM 只做角色对话和少数判断（归因、提议），其输出必须通过 TypeBox 校验 | Core P10：内核不可学习 |
 | I-6 | 测试模式下主会话**没有** bash / edit / write | "主 Agent 不执行测试"由工具层强制，而不是靠提示词约定 |
 | I-7 | 项目层 → 全局层的晋升默认需要用户执行 `/test-promote` 确认（agent-core §17-1 的默认答案） | 全自动闭环只做到项目层，跨项目污染风险由人把关 |
+| I-8 | 崩溃恢复的语义是**副作用至多执行一次**：<br>• 已完成的调用：重放日志里的结果，不重新执行。<br>• 只读或幂等的调用中途中断：可以安全重跑。<br>• 有副作用的调用中途中断：转为 `blocked`，交给人判断。<br>不追求 exactly-once | Mission 有预算上限，环境模板要求每个 Mission 使用独立的测试数据或租户，大部分操作天然幂等。真正需要人工判断的只剩"有副作用且做到一半"这一小类 |
+| I-9 | `missions/runner.ts` 实现 `MissionRunner` 接口（start / resume / abort / status），编排器只依赖接口 | 将来 pi-durable 稳定后，只需替换实现 |
 
 ---
 
@@ -144,7 +150,7 @@ pi-testmode/
 │   ├── index.ts             # 入口：注册模式、命令、工具、钩子
 │   ├── mode.ts              # 测试模式（改编自 plan-mode）
 │   ├── orchestrator/        # 主会话元工具：intent_record / knowledge_search / mission_dispatch / mission_status / report_finalize
-│   ├── missions/            # runner.ts（createAgentSession）、envelope.ts（结果信封 schema）、roles/*.md
+│   ├── missions/            # runner.ts（MissionRunner 接口 + createAgentSession 实现）、recovery.ts、journal.ts、envelope.ts、roles/*.md
 │   ├── kernel/              # policy.ts（闸门）、risk.ts、scope.ts、approvals.ts、budget.ts、audit.ts
 │   ├── sandbox/             # 改编自官方 sandbox 示例
 │   ├── harness/             # test_run、artifact_freeze、evidence（内容寻址）
@@ -216,7 +222,8 @@ pi-testmode/
 |---|---|---|
 | `meta` | `schema_version` | M1 |
 | `intents` | `id, raw, ir_json, status, report_path, created_at, closed_at` | M1 |
-| `missions` | `id, intent_id, parent_id, role, objective, spec_json, status(queued/running/completed/partial/blocked/failed/aborted), risk_tier, budget_json, cost_json, envelope_json, session_path, started_at, ended_at` | M1 |
+| `missions` | `id, intent_id, parent_id, role, objective, spec_json, status(queued/running/interrupted/completed/partial/blocked/failed/aborted), interrupt_reason(crash/network/shutdown), risk_tier, budget_json, cost_json, envelope_json, session_path, owner_pid, heartbeat_at, resume_count, notified_at, started_at, ended_at` | M1 |
+| `tool_journal` | `mission_id, tool_call_id, tool, input_digest, effect_class(read_only/idempotent/side_effecting), status(started/finished), result_digest, result_ref, started_at, finished_at`；主键 `(mission_id, tool_call_id)` | M1 |
 | `evidence` | `sha256 PK, mission_id, kind, path, bytes, created_at` | M1 |
 | `test_runs` | `id, mission_id, command, cwd, exit_code, duration_ms, stdout_sha, stderr_sha, verdict(pass/fail/inconclusive/error), artifact_shas_json` | M1 |
 | `frozen_artifacts` | `path, sha256, mission_id, frozen_at` | M1 |
@@ -232,7 +239,7 @@ pi-testmode/
 | `episodes` | `id, mission_id, fingerprint_json, plan_json, deviations_json, outcome` | M2 |
 | `template_uses` | `episode_id, template_id, version, role(applied/cited/retrieved_unused), slot` | M2 |
 | `cornerstones` | `template_id, exception_id NULL, episode_id, fingerprint_json` | M2 |
-| `feedback` | `id, episode_id, signals_json, credibility, triage_class, attribution_json` | M3 |
+| `feedback` | `id, episode_id UNIQUE, signals_json, credibility, triage_class, attribution_json`（`episode_id` 作为学习流水线的幂等键） | M3 |
 | `template_stats` | `template_id, cluster_key, alpha, beta` | M3 |
 | `deltas` | `id, op, target, payload_json, evidence_json, status(pending/committed/rejected/suspended), gate_report_json` | M3 |
 | `calibration_runs` | `id, ts, precision, recall, details_json` | M3 |
@@ -292,6 +299,7 @@ pi-testmode/
 | M1-11 | 报告 | `report_finalize` 生成 Markdown，内容包括：<br>• 结论；经复验的缺陷（最小复现、证据路径）。<br>• 未复现项及所用测试强度。<br>• 假设、未覆盖的目标、隔离级别、成本。<br>写入 `reports/`，意图标记为 closed | core §6.1 |
 | M1-12 | 靶场 canary | `canary/`：用 `node:http` 实现的库存/订单服务，附 OpenAPI 文件和 `bugs.json`（真值）。缺陷由环境变量开关：<br>• **B1 超卖**：扣减为读-改-写，无锁。<br>• **B2 分页越界**：最后一页少一条。<br>• **B3**：名称含 emoji 时返回 500。<br>• **`CONSISTENCY=eventual`**：扣减进入队列，1–2s 后生效（M3 用）。<br>• **B4**：只在 eventual 模式下出现，补偿被重复执行，静置后才出现偏差（M3 用）。<br>每个缺陷可单独开关，供预言自检注入故障 | core §13、§14 |
 | M1-13 | 测试 | **unit**：闸门规则、风险分级、scope 解析、迁移、证据哈希、信封校验。<br>**e2e**：用 `fauxProvider` 为主会话和各角色编排脚本化回复，断言"派发 → 主会话空闲（`agent_settled`）→ 唤醒 → 报告"链路和 `audit` 记录完整。faux provider 如何接入 `ModelRuntime`，以 1.4.0 的类型声明和 pi 自身测试为准。<br>**冒烟**：用真实模型跑一次 canary | — |
+| M1-14 | 崩溃恢复 | 1. **状态机**：状态变更先写库再执行动作。运行中的 Mission 每 10s 更新一次 `heartbeat_at`，并记录 `owner_pid`。<br>2. **副作用日志**：由 M1-6 的闸门负责，不新增拦截点。`tool_call` 时写入 `started`，`tool_result` 时写入 `finished`，同时记录结果摘要和证据引用。`effect_class` 由代码判定：<br>　• read/grep/find/ls → 只读<br>　• 只写本 run 目录或本 Mission 专属测试租户 → 幂等<br>　• MCP 带 `destructiveHint` / `openWorldHint`、bash 访问外部主机、依赖安装 → 有副作用<br>　• 判定不了的一律按"有副作用"处理<br>3. **启动扫描**（`session_start`）：满足以下任一条件的 Mission 标为 `interrupted(crash)`：<br>　• `running` 且心跳超时（默认 60s）<br>　• `owner_pid` 对应的进程已不存在（用 `process.kill(pid, 0)` 探测）<br>心跳未超时、属于其他存活 pi 进程的 Mission 不能接管。<br>4. **恢复**（`MissionRunner.resume`）：<br>　(a) 用 `SessionManager.open(session_path)` 打开会话，找出当前分支上的孤儿工具调用，逐个对照日志：<br>　　• 无记录 → 不补结果，交给 pi-ai 的合成结果，让模型重试<br>　　• started + finished → 用 `appendMessage` 写入日志里的真实 toolResult，**不再执行**<br>　　• 只有 started，且为只读/幂等 → 写入"已中断，可安全重跑"<br>　　• 只有 started，且有副作用 → 写入"已中断，状态未知"，Mission 转为 `blocked`，请求人工确认。确认后先执行环境模板的 reset，再继续<br>　(b) 中断时正在运行的 `test_run`，判决记为 `inconclusive`，不进入反馈。<br>　(c) 追加一条恢复提示（哪些已完成、哪些已中断），然后 `prompt()` 继续。<br>　(d) `resume_count` 超过 2 次 → 转为 `failed`。<br>　(e) `session_path` 尚未落盘（崩溃发生在首轮回复之前）→ 直接重新派发同一个 Spec。<br>5. **网络中断**：<br>　• LLM 服务商：先走 pi 自带重试；重试用尽 → `interrupted(network)`，保留现场，网络恢复后可续跑，不计失败。<br>　• SUT 不可达：分诊为 E，见 M3-3。<br>　• MCP 断线：内置 MCP 会自动重连，重连后只自动重试只读/幂等调用。<br>6. **通知发件箱**：Mission 完成时在同一事务里写入 `completed` 和 `envelope`，通知成功后再写 `notified_at`。主会话 `session_start` 时，对"已完成但未通知"的 Mission 补发唤醒消息。<br>7. **用户入口**：进入测试模式时，列出 `interrupted` / `blocked` 的 Mission，由用户选择：恢复 / 重新派发 / 放弃。<br>8. **原子性**：证据先写临时文件，`rename` 为 sha256 文件名后再登记入库；启动时清理未登记的孤儿证据文件。SQLite 使用 WAL + `synchronous=NORMAL`。<br>9. **e2e**：测试进程内起一个子进程承载 SDK 会话，在工具执行中途 kill 子进程，然后重启，断言 M1 验收第 5 条。Windows 上同样要通过 | I-8、I-9 |
 
 **验收**：
 
@@ -299,7 +307,12 @@ pi-testmode/
 2. 用真实模型测 canary，至少发现 B1，且报告中标注为"已复验"。
 3. 以下操作被拦截并记入 `audit`：写 run 目录之外的文件、修改 `scope.json`、访问白名单之外的主机（macOS/Linux）。首次 `npm i` 触发审批。
 4. 不经过 `test_run` 的输出不能产生 pass 或 fail 判决。
-5. 全部 unit 和 e2e 测试通过。
+5. 崩溃恢复（M1-14）：在工具执行中途强杀宿主进程后重启，需同时满足：
+   - 已完成的调用不会重复执行；
+   - 有副作用、执行到一半的调用转为 `blocked` 并请求确认；
+   - 中断的 `test_run` 判决作废；
+   - 主会话收到补发的唤醒消息。
+6. 全部 unit 和 e2e 测试通过。
 
 ---
 
@@ -344,8 +357,8 @@ pi-testmode/
 |---|---|---|---|
 | M3-1 | Evaluator | 用代码从信封、Verifier 结果和 `test_runs` 计算信号：经复验的缺陷数、误报、可复现率、**预言自检**、成本、`credibility`。<br>预言自检：<br>• 灵敏性：在 canary 上打开对应 bug 开关，或在测试桩中注入故障。<br>• 特异性：无故障时 k 次重跑结果稳定 | core §7.1、§10.2 |
 | M3-2 | 作弊检测 | 规则：冻结后的修改企图、无断言的测试、预期值来自 SUT 当前输出（由 Verifier 审查）。命中时 `credibility = 0`，并给元模板记一次负反馈 | core §10.3 |
-| M3-3 | 分诊 | `learning/triage.ts` 按固定顺序判定：S → N → E/C → J/I/P → B/K，判定不了归为 **U**（不更新）。<br>B 与 K 的区分用对比集算法：失败指纹对比全部基石指纹，求最小区分维度组合。<br>• 有区分维度 → B。<br>• 没有区分维度 → 用 `streamSimple` 让 LLM 提出新维度假设，写入 `facets(proposed)`，等待探测，本次归为 U | core §10.5 |
-| M3-4 | 统计 | `template_stats` 按情境簇维护 Beta(α, β)。<br>• 只更新 `applied` / `cited` 的模板，权重为 `credibility`。<br>• B 类不计入适用域内的 β，改为给对应例外的支持度 +1。<br>• 检索排序改为 Beta 后验下界 | core §10.6 |
+| M3-3 | 分诊 | `learning/triage.ts` 按固定顺序判定：S → N → E/C → J/I/P → B/K，判定不了归为 **U**（不更新）。<br>• SUT 不可达、连接重置、DNS 失败、恢复后被作废的 `test_run` → **E** 或 N，**不计负反馈**，以免网络抖动被误学成"模板不适用"。<br>B 与 K 的区分用对比集算法：失败指纹对比全部基石指纹，求最小区分维度组合。<br>• 有区分维度 → B。<br>• 没有区分维度 → 用 `streamSimple` 让 LLM 提出新维度假设，写入 `facets(proposed)`，等待探测，本次归为 U | core §10.5 |
+| M3-4 | 统计 | `template_stats` 按情境簇维护 Beta(α, β)。<br>• **幂等**：以 `episode_id` 为键（`feedback.episode_id UNIQUE`）。写入反馈、更新统计、提交 Delta 放在**同一事务**中，崩溃后重跑不会重复计数。<br>• 只更新 `applied` / `cited` 的模板，权重为 `credibility`。<br>• B 类不计入适用域内的 β，改为给对应例外的支持度 +1。<br>• 检索排序改为 Beta 后验下界 | core §10.6 |
 | M3-5 | Delta 算子 | 实现 reinforce、generalize、except、narrow、specialize、revise、pitfall、deprecate、rebind、facet.propose。<br>Curator 通过 `delta_propose` 提交，载荷做 TypeBox 校验。**全部是增量，禁止整体重写 `spec_json`** | core §10.7 |
 | M3-6 | 门禁 | `learning/gate.ts`：<br>• schema 校验与图不变式（core §8.7）。<br>• **基石回放**：对全部基石指纹重跑 `judge`，判定必须不变。<br>• 证据阈值：边界类 ≥2，内容类 ≥3；`stable` 模板提高阈值。<br>• 严重度不得提高权重。<br>• 结果为 committed（生成新版本）、suspended 或 rejected。<br>• 同一模板的 Delta 串行处理（事务 + `head_version` 乐观锁） | core §10.8 |
 | M3-7 | 状态机与逃生口 | 状态迁移 draft → candidate → stable → deprecated → retired，条件按 core §10.8。<br>逃生口（任一满足即进入内容审查）：例外 > 8；已知适用区小于峰值的 1/2；适用域内失败率下界超过阈值 | core §10.8 |
@@ -369,7 +382,7 @@ pi-testmode/
 
 ## 11. 不在本计划范围内
 
-组织层（只实现全局层和项目层）、影子版本、汤普森采样探索预算、向量检索、Mission 递归派发、多用户并发写入同一个库、迁移到 `pi-durable`（崩溃后续跑）、非 canary 的真实项目基准集。
+组织层（只实现全局层和项目层）、影子版本、汤普森采样探索预算、向量检索、Mission 递归派发、多用户并发写入同一个库、副作用 exactly-once（M1-14 只保证至多一次，exactly-once 留待迁移到 `pi-durable` 后实现）、非 canary 的真实项目基准集。
 
 ---
 
@@ -388,6 +401,10 @@ pi-testmode/
 | bash 闸门的主机检查只能尽力而为，**不是安全边界** | 网络和文件边界依赖沙箱或容器。Windows 上在报告中明确写出"仅工具层策略" |
 | Windows 下 bash 依赖 Git Bash，另有 `powershell` 工具 | 闸门同时覆盖两者；路径统一规范化（大小写、分隔符、`realpath`） |
 | `node:sqlite` 仍有 ExperimentalWarning | 只过滤这一条 warning；`store/db.ts` 隔离驱动，必要时可换成 better-sqlite3 |
+| pi-ai 自动合成的 `No result provided` 结果会诱导模型重跑有副作用的调用 | 恢复时先按 `tool_journal` 写入真实结果或"状态未知"（M1-14） |
+| PID 复用导致误判"进程存活" | 同时检查心跳是否超时，两项都满足才判定存活 |
+| 多个 pi 进程打开同一项目 | 只接管心跳已超时的 Mission；`project.db` 写入依赖 SQLite 锁，加 `busy_timeout` |
+| 崩溃前会话尚未落盘（首轮回复之前） | 直接重新派发原 Spec（M1-14 第 4(e) 条） |
 | FTS5 trigram 不匹配 1–2 个字的查询 | 用 LIKE 兜底（已实测） |
 
 ---
@@ -403,3 +420,4 @@ pi-testmode/
   - MCP 工具描述的改写途径（M2-7）。
   - `fauxProvider` 接入 `ModelRuntime` 的方式（M1-13）。
   - sandbox-runtime 在 SDK 子会话中的加载方式（M1-7）。
+  - 用 `SessionManager.open()` 重新打开会话后，`createAgentSession({ sessionManager })` 能否直接续跑；以及在 `prompt()` 之前用 `appendMessage()` 写入 toolResult 后，pi-ai 是否不再为该调用合成结果（M1-14）。
