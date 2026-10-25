@@ -4,6 +4,7 @@
     {
       "id": "B1",
       "title": "Oversell under concurrent orders",
+      "match": "oversell|超卖|over-?claim|超领|quota exceeded|stock.*negative|库存为负",
       "switch": "BUGS contains B1 (default on), CONSISTENCY=sync",
       "where": "POST /orders",
       "mechanism": "stock decrement is read-modify-write without a lock",
@@ -13,6 +14,7 @@
     {
       "id": "B2",
       "title": "Last page of /products is one item short",
+      "match": "pagination|last page|分页|最后一页|missing item",
       "switch": "BUGS contains B2 (default on)",
       "where": "GET /products?page=N",
       "mechanism": "off-by-one on the final page",
@@ -22,6 +24,7 @@
     {
       "id": "B3",
       "title": "500 when a product name contains emoji",
+      "match": "emoji|5\\d\\d|internal error|unicode",
       "switch": "BUGS contains B3 (default on)",
       "where": "POST /products",
       "mechanism": "slug step crashes on surrogate pairs",
@@ -31,6 +34,7 @@
     {
       "id": "B4",
       "title": "Cancel compensation applied twice (eventual mode only)",
+      "match": "cancel|compensat|补偿|drift after settl|double",
       "switch": "BUGS contains B4 and CONSISTENCY=eventual",
       "where": "POST /orders/{id}/cancel",
       "mechanism": "compensation enqueued twice; drift appears only after the queue settles (1-2s)",

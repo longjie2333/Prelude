@@ -15,7 +15,7 @@ afterEach(() => p.cleanup());
 
 describe("migrations", () => {
 	it("records schema versions and attaches the global layer", () => {
-		expect(p.store.schemaVersion()).toBe(2);
+		expect(p.store.schemaVersion()).toBe(3);
 		expect(p.store.schemaVersion("g")).toBe(2);
 		expect(p.store.get<{ value: string }>("SELECT value FROM g.layer_info WHERE key = 'layer'")?.value).toBe("global");
 		expect(p.store.get<{ journal_mode: string }>("PRAGMA journal_mode")?.journal_mode).toBe("wal");
@@ -24,7 +24,7 @@ describe("migrations", () => {
 	it("is idempotent on reopen", () => {
 		p.store.close();
 		const again = openStore(p.paths.projectDb, p.paths.globalDb);
-		expect(again.schemaVersion()).toBe(2);
+		expect(again.schemaVersion()).toBe(3);
 		again.close();
 		p.store = openStore(p.paths.projectDb, p.paths.globalDb);
 	});

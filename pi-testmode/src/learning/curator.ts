@@ -11,14 +11,19 @@ import { type Static, Type } from "typebox";
 import type { MissionToolHost } from "../harness/tools.ts";
 import { judge } from "../knowledge/applicability.ts";
 import { type Fingerprint, type Predicate, PredicateSchema, TEMPLATE_TYPES, type TemplateSpec, TemplateSpecSchema } from "../knowledge/schema.ts";
-import { addEdge, getTemplate, insertCornerstone, insertTemplate } from "../knowledge/store.ts";
+import { addEdge, getEpisode, getTemplate, insertCornerstone, insertTemplate } from "../knowledge/store.ts";
 import { audit } from "../store/repos.ts";
+import { bumpStats, clusterKey } from "./stats.ts";
 import type { RiskTier } from "../types.ts";
 import { textResult } from "../util.ts";
 import { Value } from "typebox/value";
 
-/** Facets that describe *what* the SUT is; the boundary is born on these (not env or goal). */
-export const DISCRIMINATIVE_FACETS = ["sut.kind", "interface.protocol", "state.shared_resource", "sut.stack", "spec.format", "interface.pagination"] as const;
+/**
+ * Facets that describe *what* the SUT is; the boundary is born on these (not env, goal, or the
+ * resource kind, which only splits statistics into clusters). `consistency.model` counts once it
+ * has been discovered and activated (M3).
+ */
+export const DISCRIMINATIVE_FACETS = ["sut.kind", "interface.protocol", "state.shared_resource", "sut.stack", "spec.format", "interface.pagination", "consistency.model"] as const;
 const HIERARCHICAL = new Set(["interface.protocol", "sut.stack"]);
 
 export interface CurateInput {
@@ -124,7 +129,12 @@ export function createTemplateProposeTool(host: MissionToolHost): ToolDefinition
 			store.tx(() => {
 				insertTemplate(store, spec, params.body, { status: "draft", changelog: `drafted by ${host.missionId} from intent ${host.spec.intentId}` });
 				addEdge(store, "project", spec.id, `intent:${host.spec.intentId}`, "derived_from", { mission: host.missionId });
-				for (const episodeId of curate.episodeIds) insertCornerstone(store, { templateId: spec.id, episodeId, fingerprint: curate.fingerprint });
+				// The founding episode is the template's first success (weak prior plus one).
+				bumpStats(store, spec.id, clusterKey(spec, curate.fingerprint), 1, 0);
+				// Cornerstones keep the raw fingerprint, so facets activated later can still tell them apart.
+				for (const episodeId of curate.episodeIds) {
+					insertCornerstone(store, { templateId: spec.id, episodeId, fingerprint: getEpisode(store, episodeId)?.fingerprint ?? curate.fingerprint });
+				}
 				audit(store, { actor: `mission:${host.missionId}`, event: "template_propose", decision: "draft", reason: `${spec.id}: hard=[${spec.applicability.hard.map((h) => h.facet).join(", ")}]` });
 			});
 			const note = rejected.length ? `\n${rejected.join("\n")}` : "";

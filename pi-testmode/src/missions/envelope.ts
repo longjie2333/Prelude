@@ -57,6 +57,22 @@ export const EnvelopeSchema = Type.Object({
 	fingerprint: Type.Optional(
 		Type.Array(FingerprintEntrySchema, { description: "Scout: situation fingerprint, using the facet names listed in your mission" }),
 	),
+	integrity_issues: Type.Optional(
+		Type.Array(Type.String(), {
+			description: "Verifier: signs a test cannot fail, skips its own assertions, or takes expected values from the SUT's current output",
+		}),
+	),
+	oracle_checks: Type.Optional(
+		Type.Array(
+			Type.Object({
+				kind: StringEnum(["sensitivity", "specificity"] as const, {
+					description: "sensitivity: the oracle run against a seeded fault must fail; specificity: clean reruns must all pass",
+				}),
+				test_run_ids: Type.Array(Type.String()),
+			}),
+			{ description: "Verifier: oracle self-checks (agent-core §7.1)" },
+		),
+	),
 	used_templates: Type.Optional(
 		Type.Array(Type.Object({ id: Type.String(), role: StringEnum(["applied", "cited"] as const) }), {
 			description: "Templates you followed (applied) or borrowed from (cited)",

@@ -23,6 +23,7 @@ import { type CapabilityRequest, createArtifactFreezeTool, createMissionSubmitTo
 import { renderTemplatesSection } from "../knowledge/render.ts";
 import { getCapability, getTemplate, listFacets } from "../knowledge/store.ts";
 import { createTemplateProposeTool } from "../learning/curator.ts";
+import { createDeltaProposeTool } from "../learning/delta-tool.ts";
 import type { ApprovalOutcome, ApprovalRequest } from "../kernel/approvals.ts";
 import { BudgetTracker } from "../kernel/budget.ts";
 import { canonicalPath } from "../kernel/paths.ts";
@@ -358,6 +359,7 @@ export class SdkMissionRunner implements MissionRunner {
 					createSkillValidateTool(toolHost),
 					createProviderRegisterTool(toolHost),
 					createTemplateProposeTool(toolHost),
+					createDeltaProposeTool(toolHost),
 				];
 				for (const t of tools) if (role.tools.includes(t.name)) pi.registerTool(t);
 				pi.on("before_agent_start", (event) => {
@@ -543,8 +545,12 @@ export class SdkMissionRunner implements MissionRunner {
 				"</conformance>",
 			]);
 		}
+		const dt = m.spec.deltaTask;
+		if (dt) {
+			out.delta = lines(["<delta>", `delta_id: ${dt.deltaId}`, `op: ${dt.op}`, `target: ${dt.target}`, `condition: ${dt.condition}`, dt.digest, "</delta>"]);
+		}
 		const k = m.spec.curate;
-		if (k) {
+		if (k && !dt) {
 			out.curate = lines([
 				"<curate>",
 				k.digest,

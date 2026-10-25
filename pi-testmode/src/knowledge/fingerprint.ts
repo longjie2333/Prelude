@@ -9,6 +9,8 @@ import { type Fingerprint, type FingerprintEntry, toFingerprint } from "./schema
 import { listEpisodes, listFacets, proposeFacet } from "./store.ts";
 
 const SUT_KIND: Record<string, string> = { api: "rest-api", web: "web-ui", cli: "cli", library: "library", service: "service" };
+/** Facets describing the request rather than the SUT; never inherited from earlier episodes. */
+const INTENT_FACETS = new Set(["goal.kind", "quality.attribute", "env.kind", "state.resource_kind"]);
 
 function envKind(env: string | undefined): string | undefined {
 	if (!env) return undefined;
@@ -52,8 +54,16 @@ export function sutKeyOf(locators: readonly string[]): string | undefined {
 	return locators[0];
 }
 
-/** Keeps active facets; records unknown ones as proposed (with the evidence that produced them). */
-export function normalizeFingerprint(s: Store, entries: readonly FingerprintEntry[], evidence: unknown): { fingerprint: Fingerprint; proposed: string[] } {
+/**
+ * Splits a reported fingerprint into its active part (used for judging) and the raw report.
+ * Facets outside the vocabulary are recorded as proposed with their observation as evidence.
+ * Episodes keep the raw report so a facet activated later can still tell old cases apart.
+ */
+export function normalizeFingerprint(
+	s: Store,
+	entries: readonly FingerprintEntry[],
+	evidence: Record<string, unknown>,
+): { fingerprint: Fingerprint; raw: Fingerprint; proposed: string[] } {
 	const active = new Set(listFacets(s, "active").map((f) => f.name));
 	const kept: FingerprintEntry[] = [];
 	const proposed: string[] = [];
@@ -61,10 +71,16 @@ export function normalizeFingerprint(s: Store, entries: readonly FingerprintEntr
 		if (active.has(e.facet)) kept.push(e);
 		else {
 			const values = e.values ?? (e.value !== undefined ? [e.value] : []);
-			if (proposeFacet(s, e.facet, values, evidence)) proposed.push(e.facet);
+			if (proposeFacet(s, e.facet, values, { ...evidence, values, conf: e.conf })) proposed.push(e.facet);
 		}
 	}
-	return { fingerprint: toFingerprint(kept), proposed };
+	return { fingerprint: toFingerprint(kept), raw: toFingerprint(entries), proposed };
+}
+
+/** The part of a fingerprint over active facets. */
+export function activeOnly(s: Store, fp: Fingerprint): Fingerprint {
+	const active = new Set(listFacets(s, "active").map((f) => f.name));
+	return Object.fromEntries(Object.entries(fp).filter(([k]) => active.has(k)));
 }
 
 /** Later sources override earlier ones facet by facet. */
@@ -76,14 +92,21 @@ export function mergeFingerprints(...fps: Array<Fingerprint | undefined>): Finge
  * The fingerprint used to judge templates for an intent: the latest scout observation of the
  * same SUT, overridden by what the intent states, overridden by explicit facets.
  */
-export function assembleFingerprint(s: Store, ir: Partial<IntentIR>, explicit: readonly FingerprintEntry[] = []): { fingerprint: Fingerprint; sutKey?: string } {
+export function assembleFingerprint(
+	s: Store,
+	ir: Partial<IntentIR>,
+	explicit: readonly FingerprintEntry[] = [],
+): { fingerprint: Fingerprint; raw: Fingerprint; sutKey?: string } {
 	const sutKey = sutKeyOf((ir.sut_refs ?? []).map((r) => r.locator));
+	// The SUT model is the latest observation of the same SUT: a scout's, or a mission that was
+	// asked to probe a facet (each episode stores the merged, cumulative view).
 	const observed = sutKey
 		? listEpisodes(s, { sutKey })
-				.filter((e) => e.plan.role === "scout")
+				.filter((e) => e.plan.role === "scout" || e.plan.role === "executor")
 				.at(-1)?.fingerprint
 		: undefined;
-	const active = new Set(listFacets(s, "active").map((f) => f.name));
-	const filterActive = (fp: Fingerprint | undefined) => (fp ? Object.fromEntries(Object.entries(fp).filter(([k]) => active.has(k))) : undefined);
-	return { fingerprint: mergeFingerprints(filterActive(observed), fromIntent(ir), filterActive(toFingerprint(explicit))), sutKey };
+	// Intent-scoped facets (goal, quality) come from the intent, not from the SUT's history.
+	const sutOnly = observed ? Object.fromEntries(Object.entries(observed).filter(([k]) => !INTENT_FACETS.has(k))) : undefined;
+	const raw = mergeFingerprints(sutOnly, fromIntent(ir), toFingerprint(explicit));
+	return { fingerprint: activeOnly(s, raw), raw, sutKey };
 }

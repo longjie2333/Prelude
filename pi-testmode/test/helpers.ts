@@ -59,13 +59,16 @@ export function policyCtx(p: TempProject, over: Partial<PolicyContext> = {}): Po
 	};
 }
 
-export async function startCanary(opts: Parameters<typeof createCanary>[0] = {}): Promise<{ url: string; port: number; close(): Promise<void> }> {
+export async function startCanary(
+	opts: Parameters<typeof createCanary>[0] = {},
+): Promise<{ url: string; port: number; close(): Promise<void>; setMode: ReturnType<typeof createCanary>["setMode"] }> {
 	const server = createCanary(opts);
 	await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
 	const port = (server.address() as AddressInfo).port;
 	return {
 		url: `http://localhost:${port}`,
 		port,
+		setMode: (m) => server.setMode(m),
 		close: () => new Promise((r) => server.close(() => r())),
 	};
 }

@@ -74,6 +74,9 @@ export function renderMissionSpec(spec: MissionSpecRecord, runDir: string): stri
 		"return: mission_submit (result envelope)",
 	];
 	if (spec.context) lines.push(`context: |\n${spec.context.split("\n").map((l) => `  ${l}`).join("\n")}`);
+	if (spec.probes?.length) {
+		lines.push(`probe: observe and report ${spec.probes.join(", ")} in mission_submit.fingerprint (with conf and src); an earlier result suggests it decides whether the template applies`);
+	}
 	if (spec.verify) {
 		const v = spec.verify;
 		lines.push(

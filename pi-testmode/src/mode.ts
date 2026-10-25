@@ -19,6 +19,10 @@ import { loadScope } from "./kernel/scope.ts";
 import { MISSION_DONE, Orchestrator, type OrchestratorOptions } from "./orchestrator/orchestrator.ts";
 import questionnaire from "./orchestrator/questionnaire.ts";
 import { createIntentRecordTool, createKnowledgeSearchTool, createMissionDispatchTool, createMissionStatusTool, createReportFinalizeTool } from "./orchestrator/tools.ts";
+import { calibrate } from "./learning/calibration.ts";
+import { garden } from "./learning/gardener.ts";
+import { renderKb, renderWhy } from "./learning/inspect.ts";
+import { promote, promotionGate } from "./learning/promote.ts";
 import { resolvePaths, type TestmodePaths } from "./paths.ts";
 import { openStore, type Store } from "./store/db.ts";
 import type { MissionRow } from "./store/repos.ts";
@@ -232,6 +236,74 @@ export function createTestmodeExtension(options: TestmodeOptions = {}): Extensio
 		});
 
 		pi.registerShortcut(Key.ctrlAlt("t"), { description: "Toggle test mode", handler: async (ctx) => toggle(ctx) });
+
+		// ---------------------------------------------------------------- knowledge commands (M3-8..M3-10)
+
+		pi.registerCommand("test-kb", {
+			description: "List templates with status, statistics, exceptions, and open hypotheses",
+			handler: async (_args, ctx) => {
+				const o = ensureOrchestrator(ctx);
+				await o.learningIdle();
+				ctx.ui.notify(renderKb(o.store), "info");
+			},
+		});
+
+		pi.registerCommand("test-why", {
+			description: "Explain why a template applies (or not) to the latest fingerprint, with its history: /test-why <tpl>",
+			handler: async (args, ctx) => {
+				const o = ensureOrchestrator(ctx);
+				const id = args.trim();
+				if (!id) return ctx.ui.notify("usage: /test-why tpl://project/<name>", "warning");
+				ctx.ui.notify(renderWhy(o.store, id), "info");
+			},
+		});
+
+		pi.registerCommand("test-promote", {
+			description: "Promote a stable project template to the global layer after its gate and your confirmation: /test-promote <tpl>",
+			handler: async (args, ctx) => {
+				const o = ensureOrchestrator(ctx);
+				const id = args.trim();
+				const check = promotionGate(o.store, id);
+				const summary = check.checks.map((c) => `${c.ok ? "✓" : "✗"} ${c.name}: ${c.detail}`).join("\n");
+				if (!check.ok) return ctx.ui.notify(`Not promotable:\n${summary}`, "warning");
+				if (!ctx.hasUI || !(await ctx.ui.confirm(`Promote ${id} to ${check.globalId}?`, summary))) return ctx.ui.notify("Promotion cancelled.", "info");
+				ctx.ui.notify(`Promoted as ${promote(o.store, id, check)} (candidate).`, "info");
+			},
+		});
+
+		pi.registerCommand("test-garden", {
+			description: "Offline consolidation: duplicates, exception folding, capacity, escape hatches, snapshot (--apply to commit through the gate)",
+			handler: async (args, ctx) => {
+				const o = ensureOrchestrator(ctx);
+				const r = garden(o.store, ensurePaths(ctx.cwd), { apply: args.includes("--apply") });
+				ctx.ui.notify(
+					[
+						`duplicates: ${r.duplicates.map((d) => `${d.deprecate} ≈ ${d.keep} (${d.similarity})${d.decision ? ` → ${d.decision}` : ""}`).join("; ") || "none"}`,
+						`folds: ${r.folds.map((f) => `${f.template} ${f.facet} (${f.exceptions.length})${f.decision ? ` → ${f.decision}` : ""}`).join("; ") || "none"}`,
+						`over capacity: ${r.overCapacity.map((c) => `${c.layer}/${c.type} ${c.count}`).join("; ") || "none"}`,
+						`transitions: ${r.transitions.join("; ") || "none"}`,
+						`snapshot: ${r.snapshot}`,
+					].join("\n"),
+					"info",
+				);
+			},
+		});
+
+		pi.registerCommand("test-calibrate", {
+			description: "Precision/recall of confirmed defects against canary ground truth; drift pauses learning: /test-calibrate [bugs=B1,B2,B3] [hours=24]",
+			handler: async (args, ctx) => {
+				const o = ensureOrchestrator(ctx);
+				const bugs = (args.match(/bugs=([A-Z0-9,]+)/i)?.[1] ?? "B1,B2,B3").split(",").map((b) => b.trim().toUpperCase());
+				const hours = Number(args.match(/hours=(\d+)/)?.[1] ?? 24);
+				const since = new Date(Date.now() - hours * 3_600_000).toISOString();
+				const intents = o.store.all<{ id: string }>("SELECT id FROM intents WHERE status = 'closed' AND closed_at >= $t", { $t: since }).map((r) => r.id);
+				const r = calibrate(o.store, intents, bugs);
+				ctx.ui.notify(
+					`precision ${r.precision.toFixed(2)}, recall ${r.recall.toFixed(2)} over ${intents.length} intent(s); found ${r.details.found.join(", ") || "none"}, missed ${r.details.missed.join(", ") || "none"}${r.drift ? `\nDRIFT: ${r.details.reasons.join("; ")}. Automatic learning is paused until a calibration without drift.` : ""}`,
+					r.drift ? "warning" : "info",
+				);
+			},
+		});
 
 		pi.registerMessageRenderer(MISSION_DONE, (message, { outputPad }, theme) => {
 			const box = new Box(outputPad, 1, (t) => theme.bg("customMessageBg", t));

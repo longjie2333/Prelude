@@ -105,6 +105,10 @@ export interface MissionSpecRecord {
 	conformance?: GapInput & { providerSha: string; providerPath: string; providerName: string };
 	/** Curator only. */
 	curate?: CurateInput;
+	/** Delta curator only (M3-5): the accumulated hypothesis to turn into a delta. */
+	deltaTask?: { deltaId: string; op: string; target: string; condition: string; digest: string };
+	/** Facets the mission must observe and report (open hypotheses on its templates). */
+	probes?: string[];
 }
 
 export interface GapInput {

@@ -52,6 +52,7 @@ export function systemText(messages: Ctx["messages"]): string {
 }
 
 export function identify(messages: Ctx["messages"]): ActorInfo {
+	if (messages.some((m) => m.role === "system" && textOf(m.content).includes("<attributor>"))) return { actor: "attributor" };
 	const sections = sectionsOf(messages);
 	if (sections.mission) {
 		const get = (key: string) => sections.mission.match(new RegExp(`^${key}: (.+?)(?:\\s+#.*)?$`, "m"))?.[1]?.trim();

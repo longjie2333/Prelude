@@ -6,6 +6,7 @@
 import type { Store } from "../store/db.ts";
 import { type Judgement, judge, type Tri } from "./applicability.ts";
 import type { Fingerprint } from "./schema.ts";
+import { templateLowerBound } from "../learning/stats.ts";
 import { edges, facetRecall, listTemplates, type TemplateRecord, textRecall } from "./store.ts";
 
 export type HitLevel = "H0" | "H1" | "H2" | "H3";
@@ -28,6 +29,8 @@ export interface Candidate {
 	template: TemplateRecord;
 	judgement: Judgement;
 	textHits: number;
+	/** Posterior lower bound × soft match (plan M3-4). */
+	utility: number;
 }
 
 export interface SearchResult {
@@ -67,7 +70,7 @@ export function rank(a: Candidate, b: Candidate): number {
 		strategy(b) - strategy(a) ||
 		RESULT_RANK[b.judgement.result] - RESULT_RANK[a.judgement.result] ||
 		(STATUS_RANK[b.template.status] ?? 0) - (STATUS_RANK[a.template.status] ?? 0) ||
-		b.judgement.score - a.judgement.score ||
+		b.utility - a.utility ||
 		(b.template.layer === "project" ? 1 : 0) - (a.template.layer === "project" ? 1 : 0) ||
 		b.textHits - a.textHits
 	);
@@ -97,7 +100,10 @@ export function searchTemplates(s: Store, query: string, fp: Fingerprint): Searc
 	const overridden = new Set(edges(s, { kind: "overrides" }).filter((e) => recalled.has(e.src)).map((e) => e.dst));
 	const judged: Candidate[] = templates
 		.filter((t) => !overridden.has(t.id))
-		.map((t) => ({ template: t, judgement: judge(t.spec.applicability, fp), textHits: text.get(t.id) ?? 0 }));
+		.map((t) => {
+			const judgement = judge(t.spec.applicability, fp);
+			return { template: t, judgement, textHits: text.get(t.id) ?? 0, utility: templateLowerBound(s, t.id) * judgement.score };
+		});
 
 	// A strategy that text recall found but the judge rejected still signals an analogous hit.
 	const relatedStrategy = judged.some((c) => c.template.type === "strategy" && c.textHits > 0);

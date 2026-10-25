@@ -13,9 +13,15 @@ import { bindingOf, quarantineProvider, resolveCapabilities, verifyBinding } fro
 import { putEvidence } from "../harness/evidence.ts";
 import type { CapabilityRequest } from "../harness/tools.ts";
 import { judge } from "../knowledge/applicability.ts";
-import { assembleFingerprint, mergeFingerprints } from "../knowledge/fingerprint.ts";
+import { activeOnly, assembleFingerprint, mergeFingerprints } from "../knowledge/fingerprint.ts";
+import type { ReportInput } from "./report.ts";
 import { getProvider, getTemplate, insertGap, listEpisodes, listGaps, listProviders, listRetrievals, seedKnowledge, setProviderTrust, updateGap } from "../knowledge/store.ts";
+import { runtimeComplete } from "../learning/attributor.ts";
+import { isLearningPaused } from "../learning/calibration.ts";
 import { recordEpisode, recordRetrievedUnused } from "../learning/episodes.ts";
+import { listDeltas } from "../learning/gate.ts";
+import { Learner, probesFor } from "../learning/pipeline.ts";
+import { buildReport, type ReportResult } from "./report.ts";
 import { type ApprovalOutcome, type ApprovalRequest, type ApprovalUI, Approvals } from "../kernel/approvals.ts";
 import { canonicalPath } from "../kernel/paths.ts";
 import { assessMissionRisk } from "../kernel/risk.ts";
@@ -26,6 +32,7 @@ import type { TestmodePaths } from "../paths.ts";
 import type { Store } from "../store/db.ts";
 import {
 	audit,
+	closeIntent,
 	freezeArtifact,
 	getIntent,
 	getMission,
@@ -103,6 +110,7 @@ export function isPidAlive(pid: number): boolean {
 export class Orchestrator {
 	readonly runner: MissionRunner;
 	readonly approvals: Approvals;
+	readonly learner: Learner;
 	private main: MainHandle | undefined;
 	private flushTimer: NodeJS.Timeout | undefined;
 	private lastModel: { provider: string; id: string } | undefined;
@@ -131,6 +139,18 @@ export class Orchestrator {
 		};
 		this.runner = opts.runnerFactory ? opts.runnerFactory(runnerOpts) : new SdkMissionRunner(runnerOpts);
 		seedKnowledge(opts.store);
+		this.learner = new Learner({
+			store: opts.store,
+			complete: async () => {
+				const model = this.lastModel;
+				if (!model) return undefined;
+				const runtime = await opts.modelRuntime();
+				const m = runtime.getModel(model.provider, model.id);
+				return m ? runtimeComplete(runtime, m) : undefined;
+			},
+			dispatchDeltaCurator: (id) => this.dispatchDeltaCurator(id),
+			paused: () => isLearningPaused(opts.store),
+		});
 	}
 
 	get store(): Store {
@@ -196,6 +216,10 @@ export class Orchestrator {
 				templates.push({ id: t.id, version: t.version, exceptionId: j.exception?.id });
 				floor = maxTier(floor, t.spec.risk_tier_floor);
 				for (const c of t.spec.capabilities_required) caps.add(c.cap);
+				// A fired `patch` exception brings its replacement slot template along (agent-core §7.4).
+				const use = j.exception?.action === "patch" ? j.exception.patch?.use : undefined;
+				const patchTpl = use?.startsWith("tpl://") ? getTemplate(store, use) : undefined;
+				if (patchTpl && !templates.some((x) => x.id === patchTpl.id)) templates.push({ id: patchTpl.id, version: patchTpl.version });
 			}
 			if (refused) {
 				audit(store, { actor: "main", event: "mission_dispatch", decision: "block", reason: refused });
@@ -255,6 +279,10 @@ export class Orchestrator {
 				templates: templates.length ? templates : undefined,
 				bindings: resolution.bindings.length ? resolution.bindings : undefined,
 				unboundCaps: resolution.missing.length ? resolution.missing : undefined,
+				probes: (() => {
+					const pr = probesFor(store, templates.map((x) => x.id));
+					return pr.length ? pr : undefined;
+				})(),
 			};
 			this.insertAndStart(spec);
 			outcomes.push({ ok: true, missionId, role: req.role, tier: risk.tier, reasons: risk.reasons });
@@ -466,6 +494,80 @@ export class Orchestrator {
 		});
 	}
 
+	// ------------------------------------------------------------ closing an intent
+
+	/** Report, close, background curator (M2-8), and background learning (M3). */
+	finalizeIntent(intentId: string, input: { conclusion: string; uncovered?: string[]; notes?: string; force?: boolean }): { report: ReportResult; curator?: string; learning: Promise<unknown> } {
+		const { store, paths } = this.opts;
+		const intent = getIntent(store, intentId);
+		if (!intent) throw new Error(`unknown intent ${intentId}`);
+		const running = listMissions(store, { intentId, statuses: ["queued", "running"] }).filter((m) => m.role !== "curator");
+		if (running.length > 0 && !input.force) {
+			throw new Error(`${running.length} mission(s) still running (${running.map((m) => m.id).join(", ")}); end your turn and wait, or pass force: true`);
+		}
+		const report = buildReport(store, paths, { intentId, conclusion: input.conclusion, uncoveredTargets: input.uncovered, notes: input.notes, isolation: this.runner.isolation() });
+		store.tx(() => {
+			closeIntent(store, intentId, report.path);
+			audit(store, { actor: "main", event: "report_finalize", reason: `${intentId}: ${report.path}` });
+		});
+		const curator = this.afterIntentClosed(intentId);
+		const learning = this.learner.enqueue(intentId).catch(() => undefined);
+		return { report, curator, learning };
+	}
+
+	/** Resolves once queued learning has run (tests, /test-kb). */
+	learningIdle(): Promise<void> {
+		return this.learner.idle();
+	}
+
+	/** An accumulated hypothesis reached its threshold: a curator turns it into a gated delta. */
+	dispatchDeltaCurator(deltaId: string): string | undefined {
+		const { store } = this.opts;
+		const d = listDeltas(store).find((x) => x.id === deltaId);
+		if (!d || (d.status !== "suspended" && d.status !== "pending")) return undefined;
+		if (listMissions(store).some((m) => m.spec.deltaTask?.deltaId === deltaId && m.status !== "failed" && m.status !== "aborted")) return undefined;
+		const episodes = d.evidence.map((id) => listEpisodes(store, {}).find((e) => e.id === id)).filter((e) => e !== undefined);
+		const latest = episodes.at(-1);
+		if (!latest) return undefined;
+		const missions = episodes.map((e) => getMission(store, e.missionId)).filter((m) => m !== undefined);
+		const condition =
+			d.op === "except"
+				? ((d.payload as { exception: { when: Array<{ facet: string; op: string; value?: string; values?: string[] }> } }).exception.when ?? []).map((w) => `${w.facet} ${w.op} ${w.value ?? w.values?.join("|")}`).join(" ∧ ")
+				: d.op;
+		const digest = [
+			`evidence (${episodes.length} episode(s)):`,
+			...missions.map((m) => {
+				const env = m.envelope as Envelope | null;
+				return [
+					`- ${m.id}: ${env?.summary ?? m.objective}`,
+					...(env?.deviations ?? []).map((x) => `  deviation @${x.at}: expected ${x.expected}; observed ${x.observed}${x.agent_hypothesis ? ` (${x.agent_hypothesis})` : ""}`),
+					...claimViews(store, m).map((v) => `  claim [${v.claim.type}, ${v.status}] ${v.claim.statement}${v.note ? ` — ${v.note}` : ""}`),
+				].join("\n");
+			}),
+		].join("\n");
+		const fingerprint = activeOnly(store, mergeFingerprints(...episodes.map((e) => e.fingerprint)));
+		const missionId = newId("m");
+		const spec: MissionSpecRecord = {
+			missionId,
+			intentId: latest.intentId,
+			role: "curator",
+			objective: `Turn hypothesis ${d.id} (${d.op} on ${d.target}) into a delta`,
+			targets: [],
+			testKinds: [],
+			riskTier: "R0",
+			riskReasons: ["curator writes only through the gate"],
+			budget: DEFAULT_BUDGETS.curator,
+			model: missions[0]?.spec.model ?? this.lastModel,
+			deltaTask: { deltaId: d.id, op: d.op, target: d.target, condition, digest },
+			// For a replacement slot template born from these episodes (template_propose).
+			curate: { episodeIds: episodes.map((e) => e.id), fingerprint, capabilities: [], riskFloor: "R0", evidenceKinds: [], digest },
+		};
+		this.insertAndStart(spec);
+		updateMission(store, missionId, { notifiedAt: nowIso() });
+		audit(store, { actor: "main", event: "delta_curator", reason: `${missionId} for ${d.id}` });
+		return missionId;
+	}
+
 	// ------------------------------------------------------------ curator (M2-8)
 
 	/** After report_finalize: retrieved-unused records, and a background Curator for H0/H1 successes. */
@@ -484,7 +586,7 @@ export class Orchestrator {
 		const { store } = this.opts;
 		const intent = getIntent(store, intentId) as NonNullable<ReturnType<typeof getIntent>>;
 		const episodes = listEpisodes(store, { intentId }).filter((e) => executors.some((x) => x.id === e.missionId));
-		const fingerprint = mergeFingerprints(...episodes.map((e) => e.fingerprint));
+		const fingerprint = activeOnly(store, mergeFingerprints(...episodes.map((e) => e.fingerprint)));
 		const capabilities = [
 			...executors.flatMap((m) => (m.spec.bindings ?? []).map((b) => b.capId)),
 			...listMissions(store, { intentId }).flatMap((m) => listGaps(store, { requestedBy: m.id }).filter((g) => g.status === "resolved").map((g) => g.capId)),

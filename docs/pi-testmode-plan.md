@@ -155,6 +155,14 @@
 | I-16 | 新模板的硬边界不由 LLM 决定：取基石指纹中**判别性维度**（sut.kind、interface.protocol、state.shared_resource、sut.stack、spec.format、interface.pagination，置信度 ≥0.5）；LLM 追加的硬条件必须对基石成立，否则丢弃。env.kind、goal.kind 不进硬边界 | "从窄处出生"且可复用；同时保证基石案例被自己的边界接纳 |
 | I-17 | MCP 工具的模型可见描述一律由系统生成（能力语义 + 工具名 + 参数），**丢弃**上游描述，而不是尝试清洗 | 清洗无法证明完备；丢弃最简单且安全 |
 | I-18 | 种子词表**不含** `consistency.model`；只有命中级别为相关策略时才定 H2/H3，仅因共享维度被召回的策略不影响命中级别 | 前者让 M3 验收能演示"从误报中发现新维度"；后者避免不相关的适用策略抬高命中级别 |
+| I-19 | 统计、反馈、Delta 全部存在 `project.db`（包括针对全局模板的）；项目对全局模板的修订一律落到**项目层覆盖副本**（`overrides` 边） | 写反馈、更新统计、提交 Delta 必须在同一 SQLite 事务（M3-4）；跨 ATTACH 文件的提交在崩溃时不保证原子 |
+| I-20 | 分诊新增 `V`（有效的未发现：预言灵敏性与特异性自检都通过）为正反馈；没有自检的 pass 归 `U`。灵敏性：已确认的缺陷本身即证据；否则需 Verifier 在 `oracle_checks` 中引用注入故障下失败的 `test_run` | core §10.2"两类未发现必须区分" |
+| I-21 | 情境簇 = 指纹在模板条件所涉维度 ∪ {sut.kind, sut.stack, state.resource_kind, consistency.model} 上的投影。`state.resource_kind` 只分簇、不进硬边界 | 同一边界内不同资源类别要能形成不同簇（M3 验收 1），又不能让模板"出生"在单一资源上 |
+| I-22 | 每次可信度 ≥0.5 的 S/V 都把该经历加为基石（每簇上限 5），而不只是"情境新颖"时 | 否则同簇复用永远凑不齐 stable 所需的 3 个基石；上限防止基石膨胀 |
+| I-23 | 经历存**原始指纹**（含未激活维度），判定时再过滤到 active。SUT 模型 = 同一 SUT 最近一次 scout/executor 经历；意图类维度（goal、quality、env、resource_kind）不继承 | 维度激活后，旧基石仍能用当时记录的值与新失败区分（core §14 第 3–4 幕） |
+| I-24 | 新维度激活条件：有维度假设（attributor 双评判一致）、至少一次置信度 ≥0.7 的观察、至少两个不同取值。派发时把待验证维度（`facet.propose` 与悬置 `except` 涉及的维度）写入 Mission 的 `probe`，由执行者在 `fingerprint` 中报告 | "探测"由执行任务顺带完成，不必为每个假设单派 Scout |
+| I-25 | 触发的 `patch` 例外若指向模板，派发时把该模板一并激活；例外的支持度记在 `template_stats` 的 `exception:<id>` 行，不混入适用域内统计 | 例外结果才能被执行和计分（M3 验收 3）；B 类不污染 β |
+| I-26 | 晋升门禁的"≥2 个项目"在单库内以"基石覆盖 ≥2 个不同 SUT"近似；`/test-calibrate` 基于时间窗内已关闭的意图计算，不自动跑固定意图集；Gardener 的去重合并为确定性"弃用较弱者 + redirects_to"，不调 LLM 改写内容 | 单个 project.db 看不到其他项目（组织层不在范围）；保持门禁与整理全部可复现 |
 
 ---
 

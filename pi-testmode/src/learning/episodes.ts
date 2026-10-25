@@ -2,7 +2,7 @@
  * Episodes and template use records (plan M2-9). One episode per scout/executor/verifier mission;
  * `applied`/`cited` are declared in the envelope and checked against what was actually injected.
  */
-import { assembleFingerprint, normalizeFingerprint, sutKeyOf } from "../knowledge/fingerprint.ts";
+import { assembleFingerprint, mergeFingerprints, normalizeFingerprint, sutKeyOf } from "../knowledge/fingerprint.ts";
 import type { Fingerprint } from "../knowledge/schema.ts";
 import { getEpisodeByMission, getTemplate, insertEpisode, insertTemplateUse, listEpisodes, listGaps, listRetrievals } from "../knowledge/store.ts";
 import type { Envelope } from "../missions/envelope.ts";
@@ -20,13 +20,15 @@ export function recordEpisode(s: Store, m: MissionRow): string | undefined {
 	const env = m.envelope as Envelope | null;
 	const sutKey = sutKeyOf([...m.spec.targets, ...(ir.sut_refs ?? []).map((r) => r.locator)]);
 
+	// Raw fingerprint: what was known about the SUT (latest scout), what the intent states, and what
+	// this mission itself reported (any role may report facets, e.g. when asked to probe one).
+	const reported = env?.fingerprint?.length ? normalizeFingerprint(s, env.fingerprint, { mission: m.id }).raw : undefined;
 	let fingerprint: Fingerprint;
-	if (m.role === "scout" && env?.fingerprint?.length) {
-		fingerprint = normalizeFingerprint(s, env.fingerprint, { mission: m.id }).fingerprint;
-		// Facets the intent states stay authoritative.
-		fingerprint = { ...fingerprint, ...assembleFingerprint(s, { ...ir, sut_refs: [] }).fingerprint };
+	if (m.role === "scout") {
+		// A scout's observation replaces the previous one; the intent's facets stay authoritative.
+		fingerprint = mergeFingerprints(reported, assembleFingerprint(s, { ...ir, sut_refs: [] }).raw);
 	} else {
-		fingerprint = assembleFingerprint(s, ir).fingerprint;
+		fingerprint = mergeFingerprints(assembleFingerprint(s, ir).raw, reported);
 	}
 
 	const gaps = listGaps(s, { requestedBy: m.id });

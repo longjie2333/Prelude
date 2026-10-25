@@ -53,6 +53,19 @@
         }
       }
     },
+    "/coupons/{code}": {
+      "get": {
+        "parameters": [{ "name": "code", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Coupon with its quota and remaining claims" }, "404": { "description": "Not found" } }
+      }
+    },
+    "/coupons/{code}/claim": {
+      "post": {
+        "summary": "Claim one use of a coupon. remaining never goes below zero.",
+        "parameters": [{ "name": "code", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "201": { "description": "Claimed" }, "409": { "description": "Quota exhausted" } }
+      }
+    },
     "/orders": {
       "get": { "responses": { "200": { "description": "All orders" } } },
       "post": {

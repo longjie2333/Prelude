@@ -19,6 +19,7 @@ export const SEED_FACETS: SeedFacet[] = [
 	{ name: "interface.protocol", type: "hier", values: ["http/json", "http/html", "grpc", "graphql"] },
 	{ name: "interface.pagination", type: "bool", values: ["true", "false"] },
 	{ name: "state.shared_resource", type: "bool", values: ["true", "false"] },
+	{ name: "state.resource_kind", type: "enum", values: ["inventory", "quota", "balance", "seat"] },
 	{ name: "env.kind", type: "enum", values: ["local", "dev", "staging", "production"] },
 	{ name: "oracle.availability", type: "set", values: ["spec", "invariant", "reference", "baseline"] },
 	{ name: "spec.format", type: "enum", values: ["openapi", "graphql-schema", "none"] },

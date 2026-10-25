@@ -156,24 +156,7 @@ export function createReportFinalizeTool(host: MainToolHost): ToolDefinition {
 		defaultActive: false,
 		async execute(_id, params) {
 			const o = host.orchestrator();
-			const intent = getIntent(o.store, params.intent_id);
-			if (!intent) throw new Error(`unknown intent ${params.intent_id}`);
-			const running = listMissions(o.store, { intentId: params.intent_id, statuses: ["queued", "running"] });
-			if (running.length > 0 && !params.force) {
-				throw new Error(`${running.length} mission(s) still running (${running.map((m) => m.id).join(", ")}); end your turn and wait, or pass force: true`);
-			}
-			const r = buildReport(o.store, host.paths(), {
-				intentId: params.intent_id,
-				conclusion: params.conclusion,
-				uncoveredTargets: params.uncovered,
-				notes: params.notes,
-				isolation: o.runner.isolation(),
-			});
-			o.store.tx(() => {
-				closeIntent(o.store, params.intent_id, r.path);
-				audit(o.store, { actor: "main", event: "report_finalize", reason: `${params.intent_id}: ${r.path}` });
-			});
-			const curator = o.afterIntentClosed(params.intent_id);
+			const { report: r, curator } = o.finalizeIntent(params.intent_id, { conclusion: params.conclusion, uncovered: params.uncovered, notes: params.notes, force: params.force });
 			return textResult(
 				`Report written: ${r.path}\nconfirmed defects: ${r.confirmedDefects}, confirmed passes: ${r.confirmedPasses}, not confirmed: ${r.unconfirmed}${curator ? `\nA curator (${curator}) distills a draft template in the background.` : ""}`,
 				{ path: r.path, confirmedDefects: r.confirmedDefects, confirmedPasses: r.confirmedPasses, unconfirmed: r.unconfirmed },

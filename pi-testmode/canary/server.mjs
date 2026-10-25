@@ -10,6 +10,11 @@ import { fileURLToPath } from "node:url";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+const COUPONS = [
+	{ code: "SAVE10", quota: 5, remaining: 5 },
+	{ code: "VIP", quota: 2, remaining: 2 },
+];
+
 const SEED = [
 	{ id: "p1", name: "Widget", price: 9.5, stock: 10 },
 	{ id: "p2", name: "Gadget", price: 19, stock: 5 },
@@ -27,12 +32,13 @@ export function parseBugs(value) {
 }
 
 export function createCanary(options = {}) {
-	const bugs = options.bugs ?? parseBugs(process.env.BUGS);
-	const consistency = options.consistency ?? process.env.CONSISTENCY ?? "sync";
-	const eventual = consistency === "eventual";
+	let bugs = options.bugs ?? parseBugs(process.env.BUGS);
+	let consistency = options.consistency ?? process.env.CONSISTENCY ?? "sync";
+	let eventual = consistency === "eventual";
 	const settleMs = () => 1000 + Math.floor(Math.random() * 1000);
 
 	let products;
+	let coupons;
 	let orders;
 	let reserved; // eventual mode: committed decisions, applied to `stock` later
 	let seq;
@@ -46,6 +52,7 @@ export function createCanary(options = {}) {
 			for (const [id, s] of Object.entries(body.stock)) if (products.has(id)) products.get(id).stock = Number(s);
 		}
 		orders = new Map();
+		coupons = new Map(COUPONS.map((c) => [c.code, { ...c }]));
 		reserved = new Map([...products.values()].map((p) => [p.id, p.stock]));
 		seq = 0;
 	}
@@ -82,6 +89,22 @@ export function createCanary(options = {}) {
 		const order = { id: `o${++seq}`, productId, qty, status: "placed" };
 		orders.set(order.id, order);
 		return [201, order];
+	}
+
+	// Coupon quota: the same read-modify-write shape as stock (B1 applies to both resources).
+	async function claimCoupon(code) {
+		const c = coupons.get(code);
+		if (!c) return [404, { error: "coupon not found" }];
+		if (bugs.has("B1") && !eventual) {
+			const seen = c.remaining;
+			await sleep(5 + Math.floor(Math.random() * 15));
+			if (seen < 1) return [409, { error: "quota exhausted" }];
+			c.remaining = seen - 1;
+		} else {
+			if (c.remaining < 1) return [409, { error: "quota exhausted" }];
+			c.remaining -= 1;
+		}
+		return [201, { code, remaining: c.remaining }];
 	}
 
 	function cancelOrder(id) {
@@ -143,6 +166,11 @@ export function createCanary(options = {}) {
 				return p ? [200, p] : [404, { error: "product not found" }];
 			}
 		}
+		if (parts[0] === "coupons" && parts.length >= 2) {
+			const c = coupons.get(parts[1]);
+			if (m === "GET" && parts.length === 2) return c ? [200, c] : [404, { error: "coupon not found" }];
+			if (m === "POST" && parts.length === 3 && parts[2] === "claim") return claimCoupon(parts[1]);
+		}
 		if (parts[0] === "orders") {
 			if (m === "GET" && parts.length === 1) return [200, { items: [...orders.values()] }];
 			if (m === "POST" && parts.length === 1) return placeOrder(body?.productId, body?.qty);
@@ -179,6 +207,15 @@ export function createCanary(options = {}) {
 	server.on("close", () => {
 		for (const t of timers) clearTimeout(t);
 	});
+	/** Test hook: switch bugs/consistency on a running server (same URL, state reset). */
+	server.setMode = (mode) => {
+		if (mode.bugs) bugs = mode.bugs;
+		if (mode.consistency) {
+			consistency = mode.consistency;
+			eventual = consistency === "eventual";
+		}
+		reset();
+	};
 	return server;
 }
 
