@@ -55,6 +55,9 @@
 | 恢复续跑（M1 实测） | `SessionManager.open(path, runDir, cwd)` 后先 `appendMessage(toolResult)` 再 `createAgentSession({ sessionManager })`，可以直接续跑；已写入结果的调用不再被合成 `No result provided` | M1-14 |
 | sandbox-runtime（M1 实测 API） | `SandboxManager` 是全局单例，但 `wrapWithSandbox(cmd, shell, customConfig)` 接受逐条命令的配置，多个 Mission 可共用一次 `initialize` | M1-7 |
 | 安装（M1 实测） | npm 11 解析 vitest 可选 peer 时崩溃（`reading 'edgesOut'`），包内 `.npmrc` 设 `legacy-peer-deps=true` | — |
+| Skill 精确绑定（M2 实测） | `DefaultResourceLoader({ noSkills: true, additionalSkillPaths })` 仍加载 `additionalSkillPaths`，因此 Mission 只看到绑定的 Skill；主会话可在 `before_agent_start` 里把 `systemPromptOptions.skills` 置空来隐藏用户 Skill | M2-5、M2 验收 3 |
+| MCP 描述改写（M2 实测） | 上游描述会原样出现在两处：工具声明（system 消息的 `toolsAdded`）和 `tool_search` 的结果文本。前者用任一常驻工具的 `prepareLoadout` 返回 `descriptions` 替换，后者在 `tool_result` 中替换；`mcp_servers` 段在 MCP 扩展之后注册的 `before_agent_start` 中覆盖。`pi.getAllTools()` 返回 MCP 工具的完整定义（description / parameters / annotations / namespace），可据此计算定义哈希 | M2-7 |
+| MCP 试连（M2 实测） | Mission 内加载 `createMcpExtension({ loadConfig: () => ({ servers: [], errors: [] }) })` 后，`pi.registerMcpServer()` 注册的服务器会被连接，工具出现在 `getAllTools()`；`unregisterMcpServer()` 断开 | M2-7 Toolsmith |
 
 ---
 
@@ -147,6 +150,11 @@
 | I-11 | 复验结论由代码判定：Verifier 信封的 `verification` 条目引用它**自己的** `test_run`，对照声明所需判决（defect→fail，pass→pass），全部一致为 confirmed，全部相反为 refuted，其余 inconclusive | Verifier 的措辞不参与判定，与"判决只来自 test_run"一致 |
 | I-12 | 自动派发的 Verifier 继承 Executor 的风险等级，不再单独审批 | 目标和操作与已授权的 Executor 相同；避免在后台完成回调中弹审批 |
 | I-13 | 首轮回复前崩溃（会话未落盘）时，用**同一个** mission_id 重跑原 Spec，`resume_count` 加一 | 不产生孤儿 Mission 记录，报告里只出现一次 |
+| I-14 | 能力验证分两步：Toolsmith 的 `provider_register` 只登记为 `candidate`；编排器随后派发**一致性 Verifier**（候选者直接写入其 `bindings`），由其 `test_run` 结果（通过率 ≥0.9、有 pass 声明、无 defect 声明、哈希未变）决定升为 `verified`。只有 verified/pinned 才会被绑定到普通 Mission | 构建者与验证者分离（core §9.4）；晋升由代码判定 |
+| I-15 | Mission 是否唤醒主会话按**子树**判定：根 Mission 及其全部后代（Verifier、Toolsmith、一致性 Verifier）都停下后才发一次唤醒；Curator 永不唤醒 | 主会话每个结果只被唤醒一次，且不会看到"能力还在验证中"的半成品 |
+| I-16 | 新模板的硬边界不由 LLM 决定：取基石指纹中**判别性维度**（sut.kind、interface.protocol、state.shared_resource、sut.stack、spec.format、interface.pagination，置信度 ≥0.5）；LLM 追加的硬条件必须对基石成立，否则丢弃。env.kind、goal.kind 不进硬边界 | "从窄处出生"且可复用；同时保证基石案例被自己的边界接纳 |
+| I-17 | MCP 工具的模型可见描述一律由系统生成（能力语义 + 工具名 + 参数），**丢弃**上游描述，而不是尝试清洗 | 清洗无法证明完备；丢弃最简单且安全 |
+| I-18 | 种子词表**不含** `consistency.model`；只有命中级别为相关策略时才定 H2/H3，仅因共享维度被召回的策略不影响命中级别 | 前者让 M3 验收能演示"从误报中发现新维度"；后者避免不相关的适用策略抬高命中级别 |
 
 ---
 
@@ -426,7 +434,7 @@ pi-testmode/
 - **设计问题**：先查 [agent-core.md](agent-core.md) 的对应章节。仍无法决定时，在本文档 §4 追加一条 `I-n` 决策并写明理由，然后继续，不扩大范围。
 - **未核实项**（实施时第一步确认）：
   - pi-skills 中检索类 Skill 的名称（§2.5）。
-  - MCP 工具描述的改写途径（M2-7）。
+  - ~~MCP 工具描述的改写途径（M2-7）~~：已核实，见 §1 与 `test/e2e/mcp.test.ts`。
   - ~~`fauxProvider` 接入 `ModelRuntime` 的方式（M1-13）~~：已核实，见 §1。
   - sandbox-runtime 在 SDK 子会话中的加载方式（M1-7）：API 已核实（§1），以替换 `bash` 工具的内联扩展注入；**未在 macOS/Linux 上实际运行**（开发机为 Windows）。
   - ~~`SessionManager.open()` 续跑与 `appendMessage()` 写入 toolResult（M1-14）~~：已核实，见 §1 与 `test/e2e/crash.test.ts`。

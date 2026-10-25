@@ -10,16 +10,18 @@ import {
 	type AgentSession,
 	createAgentSession,
 	DefaultResourceLoader,
+	type ExtensionAPI,
 	type ExtensionFactory,
 	type ModelRuntime,
 	SessionManager,
 	SettingsManager,
 } from "@earendil-works/pi-coding-agent";
+import { MCP_SECTION, mcpBindings, mcpGuard, missionMcpExtensions, toolPrefix } from "../capabilities/mcp-bind.ts";
 import { quarantineProvider, verifyBinding } from "../capabilities/registry.ts";
 import { createCapabilityRequestTool, createProviderRegisterTool, createSkillValidateTool } from "../capabilities/tools.ts";
 import { type CapabilityRequest, createArtifactFreezeTool, createMissionSubmitTool, createTestRunTool, type MissionToolHost } from "../harness/tools.ts";
 import { renderTemplatesSection } from "../knowledge/render.ts";
-import { getTemplate, listFacets } from "../knowledge/store.ts";
+import { getCapability, getTemplate, listFacets } from "../knowledge/store.ts";
 import { createTemplateProposeTool } from "../learning/curator.ts";
 import type { ApprovalOutcome, ApprovalRequest } from "../kernel/approvals.ts";
 import { BudgetTracker } from "../kernel/budget.ts";
@@ -38,6 +40,15 @@ import { applyResolutions, recoveryNote, resolveOrphans } from "./recovery.ts";
 import { loadRole, renderMissionSpec, roleTools } from "./roles.ts";
 
 export const MAX_RESUMES = 2;
+
+async function waitForTools<T>(get: () => T[], timeoutMs: number): Promise<T[]> {
+	const start = Date.now();
+	for (;;) {
+		const found = get();
+		if (found.length > 0 || Date.now() - start > timeoutMs) return found;
+		await new Promise((r) => setTimeout(r, 50));
+	}
+}
 
 const NL = String.fromCharCode(10);
 const lines = (xs: readonly string[]) => xs.filter(Boolean).join(NL);
@@ -288,6 +299,12 @@ export class SdkMissionRunner implements MissionRunner {
 			}
 		}
 
+		// MCP providers bound to this mission (M2-7); the Toolsmith loads the MCP extension to probe servers.
+		const mcpBound = mcpBindings(m.spec.bindings ?? []).map((binding) => ({ binding, semantics: getCapability(store, binding.capId)?.semantics ?? binding.capId }));
+		const guard = mcpGuard(mcpBound, (b, now) => quarantineProvider(store, b.sha256, `mission:${m.id}`, `MCP tool definitions changed (${b.mcp?.toolDefsSha.slice(0, 8)} → ${now.slice(0, 8)})`));
+		const useMcp = mcpBound.length > 0 || role.tools.includes("provider_register");
+		let missionPi: ExtensionAPI | undefined;
+
 		const toolHost: MissionToolHost = {
 			store,
 			missionId: m.id,
@@ -298,6 +315,19 @@ export class SdkMissionRunner implements MissionRunner {
 			paths,
 			spec: m.spec,
 			requestCapability: this.opts.hooks.requestCapability ? (req) => this.opts.hooks.requestCapability?.(m.id, req) ?? { message: "unavailable" } : undefined,
+			approve: async (req) => (await this.opts.hooks.approve({ actor: `mission:${m.id}`, missionId: m.id, ...req })).approved,
+			probeMcp: async (server, config) => {
+				const pi = missionPi;
+				if (!pi) throw new Error("mission extension runtime unavailable");
+				pi.registerMcpServer(server, { ...(config as object), exposure: "deferred" } as never);
+				const prefix = toolPrefix(server);
+				try {
+					const tools = await waitForTools(() => pi.getAllTools().filter((t) => t.name.startsWith(prefix)), 15_000);
+					return tools.map((t) => ({ name: t.name, description: t.description, parameters: t.parameters, annotations: t.annotations }));
+				} finally {
+					pi.unregisterMcpServer(server);
+				}
+			},
 			onSubmit: (env) => {
 				entry.envelope = env;
 				// Durable before the mission is finalized, so a crash here does not lose the result.
@@ -306,10 +336,7 @@ export class SdkMissionRunner implements MissionRunner {
 		};
 		const missionSection = renderMissionSpec(m.spec, m.runDir);
 		const extraSections = this.missionSections(m);
-		const skillPaths = [
-			...(m.spec.bindings ?? []).filter((b) => b.kind === "skill" && b.path).map((b) => b.path as string),
-			...(m.spec.conformance ? [m.spec.conformance.providerPath] : []),
-		];
+		const skillPaths = [...new Set((m.spec.bindings ?? []).filter((b) => b.kind === "skill" && b.path).map((b) => b.path as string))];
 		const factories: ExtensionFactory[] = [
 			policyExtension({
 				store: () => store,
@@ -317,12 +344,16 @@ export class SdkMissionRunner implements MissionRunner {
 				actor: () => `mission:${m.id}`,
 				approve: (req) => this.opts.hooks.approve(req),
 				journal: { missionId: m.id, evidenceDir: paths.evidenceDir },
+				guard: mcpBound.length ? (pi, toolName) => guard.check(pi, toolName) : undefined,
 			}),
 			(pi) => {
+				missionPi = pi;
+				const submit = createMissionSubmitTool(toolHost);
 				const tools = [
 					createTestRunTool(toolHost),
 					createArtifactFreezeTool(toolHost),
-					createMissionSubmitTool(toolHost),
+					// mission_submit is active in every role, so it carries the MCP description rewrite (extensions.md "Tool exposure").
+					mcpBound.length ? { ...submit, prepareLoadout: (l: Parameters<typeof guard.prepareLoadout>[0]) => guard.prepareLoadout(l) } : submit,
 					createCapabilityRequestTool(toolHost),
 					createSkillValidateTool(toolHost),
 					createProviderRegisterTool(toolHost),
@@ -335,6 +366,21 @@ export class SdkMissionRunner implements MissionRunner {
 				});
 			},
 		];
+		if (useMcp) {
+			factories.push(...missionMcpExtensions(mcpBound, m.runDir), (pi) => {
+				// Registered after the MCP extension so these handlers see (and replace) its output.
+				pi.on("before_agent_start", (event) => {
+					if (mcpBound.length) event.systemPromptOptions.sections[MCP_SECTION] = guard.section();
+					else delete event.systemPromptOptions.sections[MCP_SECTION];
+				});
+				pi.on("tool_result", (event) => {
+					if (event.toolName !== "tool_search") return undefined;
+					const text = event.content.map((c) => ("text" in c ? c.text : "")).join(NL);
+					const rewritten = guard.rewriteSearch(pi, text);
+					return rewritten === undefined ? undefined : { content: [{ type: "text", text: rewritten }] };
+				});
+			});
+		}
 		if (!this.opts.noSandbox && role.tools.includes("bash")) {
 			const sandbox = await missionSandboxExtension(
 				paths.root,
@@ -366,7 +412,7 @@ export class SdkMissionRunner implements MissionRunner {
 			model,
 			modelRuntime: runtime,
 			resourceLoader: loader,
-			tools: roleTools(role),
+			tools: useMcp ? [...roleTools(role), "tool_search"] : roleTools(role),
 			sessionManager: sm,
 			settingsManager: SettingsManager.inMemory({ compaction: { enabled: true }, ...(this.opts.settings ?? {}) }),
 		});

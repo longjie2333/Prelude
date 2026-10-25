@@ -10,6 +10,7 @@ import type { Store } from "../store/db.ts";
 import { audit } from "../store/repos.ts";
 import type { Actor } from "../types.ts";
 import { sha256 } from "../util.ts";
+import type { McpLocation } from "./mcp-bind.ts";
 
 export interface CapabilityBinding {
 	capId: string;
@@ -18,6 +19,20 @@ export interface CapabilityBinding {
 	name: string;
 	version: string;
 	path?: string;
+	/** MCP providers: server name, config, and the tool-definition hash checked on every call. */
+	mcp?: McpLocation;
+}
+
+function toBinding(capId: string, p: ProviderRow): CapabilityBinding {
+	return {
+		capId,
+		sha256: p.sha256,
+		kind: p.kind,
+		name: p.name,
+		version: p.version,
+		path: p.location.path,
+		mcp: p.kind === "mcp" ? (p.location as unknown as McpLocation) : undefined,
+	};
 }
 
 function listFiles(dir: string): string[] {
@@ -39,6 +54,7 @@ export function hashDirectory(dir: string): string {
 
 export type BindingCheck = { ok: true } | { ok: false; reason: string };
 
+/** Skills are re-hashed from disk; MCP providers are checked against their tool definitions at call time. */
 export function verifyBinding(b: CapabilityBinding): BindingCheck {
 	if (b.kind !== "skill" || !b.path) return { ok: true };
 	try {
@@ -72,7 +88,7 @@ export function resolveCapabilities(s: Store, capIds: readonly string[], actor: 
 		);
 		let bound: CapabilityBinding | undefined;
 		for (const p of candidates) {
-			const binding: CapabilityBinding = { capId, sha256: p.sha256, kind: p.kind, name: p.name, version: p.version, path: p.location.path };
+			const binding = toBinding(capId, p);
 			const check = verifyBinding(binding);
 			if (check.ok) {
 				bound = binding;
@@ -89,5 +105,5 @@ export function resolveCapabilities(s: Store, capIds: readonly string[], actor: 
 
 export function bindingOf(s: Store, sha: string, capId: string): CapabilityBinding | undefined {
 	const p = getProvider(s, sha);
-	return p ? { capId, sha256: p.sha256, kind: p.kind, name: p.name, version: p.version, path: p.location.path } : undefined;
+	return p ? toBinding(capId, p) : undefined;
 }

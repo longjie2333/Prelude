@@ -271,7 +271,7 @@ export interface ProviderRow {
 	kind: "skill" | "mcp" | "cli";
 	name: string;
 	version: string;
-	location: { path?: string; config?: unknown; toolDefsSha?: string };
+	location: { path?: string; server?: string; config?: unknown; toolDefsSha?: string };
 	trust: Trust;
 	conformanceScore: number | null;
 	provenance: Record<string, unknown>;

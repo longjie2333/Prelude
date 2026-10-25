@@ -23,6 +23,8 @@ export interface PolicyHost {
 	approve(req: ApprovalRequest): Promise<ApprovalOutcome>;
 	/** Journal tool calls for crash recovery (missions only). */
 	journal?: { missionId: string; evidenceDir: string };
+	/** Extra kernel check run first (MCP tool-definition hash lock); returns a block reason. */
+	guard?(pi: ExtensionAPI, toolName: string): string | undefined;
 }
 
 export function policyExtension(host: PolicyHost): ExtensionFactory {
@@ -47,6 +49,11 @@ export function policyExtension(host: PolicyHost): ExtensionFactory {
 			};
 
 			try {
+				const guarded = host.guard?.(pi, event.toolName);
+				if (guarded) {
+					record("block", guarded);
+					return { block: true, reason: guarded };
+				}
 				let decision = evaluateToolCall(event.toolName, input, ctx);
 				if (decision.action === "ask") {
 					const outcome = await host.approve({

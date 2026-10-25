@@ -29,6 +29,9 @@ export interface MissionToolHost {
 	/** Called once a valid envelope is submitted; the runner ends the mission. */
 	onSubmit(envelope: Envelope): void;
 	requestCapability?(req: CapabilityRequest): { message: string; gapId?: string };
+	/** Toolsmith: connect an MCP server through pi's MCP extension and return its tool definitions. */
+	probeMcp?(server: string, config: unknown): Promise<Array<{ name: string; description: string; parameters: unknown; annotations?: unknown }>>;
+	approve?(req: { tier: "R2" | "R3" | "R4"; subject: string; title: string; detail: string }): Promise<boolean>;
 }
 
 export interface CapabilityRequest {

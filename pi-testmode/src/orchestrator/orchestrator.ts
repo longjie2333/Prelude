@@ -407,7 +407,7 @@ export class Orchestrator {
 		const gap = listGaps(store, { toolsmithMissionId: t.id })[0];
 		if (!gap) return;
 		const provider = gap.providerSha ? getProvider(store, gap.providerSha) : undefined;
-		if (t.status !== "completed" || !provider?.location.path) {
+		if (t.status !== "completed" || !provider || (provider.kind === "skill" && !provider.location.path)) {
 			updateGap(store, gap.id, { status: "failed" });
 			audit(store, { actor: "main", event: "capability_failed", reason: `${gap.id} ${gap.capId}: toolsmith ${t.status}${provider ? "" : ", no provider registered"}` });
 			return;
@@ -425,6 +425,8 @@ export class Orchestrator {
 			riskReasons: [`conformance of ${t.id}'s provider`],
 			budget: DEFAULT_BUDGETS.verifier,
 			model: t.spec.model,
+			// The candidate is bound here on purpose: checking it is what promotes it.
+			bindings: [bindingOf(store, provider.sha256, gap.capId)].filter((b) => b !== undefined),
 			conformance: {
 				gapId: gap.id,
 				capId: gap.capId,
@@ -432,7 +434,7 @@ export class Orchestrator {
 				io: gap.spec.io,
 				acceptanceHints: gap.spec.acceptance_hints,
 				providerSha: provider.sha256,
-				providerPath: provider.location.path,
+				providerPath: provider.location.path ?? `mcp server ${provider.location.server}`,
 				providerName: provider.name,
 			},
 		};

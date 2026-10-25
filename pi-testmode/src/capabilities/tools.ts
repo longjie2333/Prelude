@@ -6,9 +6,10 @@ import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent
 import { Type } from "typebox";
 import type { MissionToolHost } from "../harness/tools.ts";
 import { canonicalPath, isInside } from "../kernel/paths.ts";
-import { addEdge, ensureCapability, insertProvider, listGaps, updateGap } from "../knowledge/store.ts";
+import { addEdge, ensureCapability, insertProvider, listGaps, listProviders, updateGap } from "../knowledge/store.ts";
 import { audit } from "../store/repos.ts";
 import { textResult } from "../util.ts";
+import { mcpProviderHash, serverName, toolDefsHash } from "./mcp-bind.ts";
 import { hashDirectory } from "./registry.ts";
 import { validateSkill } from "./skill-validate.ts";
 
@@ -66,21 +67,69 @@ export function createSkillValidateTool(host: MissionToolHost): ToolDefinition {
 	});
 }
 
+async function registerMcp(
+	host: MissionToolHost,
+	params: { cap: string; semantics: string; version?: string; name?: string; mcp?: { command: string; args?: string[]; env?: Record<string, string> } },
+) {
+	if (!params.mcp || !params.name) throw new Error("kind mcp needs name and mcp { command, args }");
+	if (!host.probeMcp || !host.approve) throw new Error("MCP registration is not available in this mission");
+	const server = serverName(params.name);
+	if (listProviders(host.store).some((p) => p.kind === "mcp" && p.location.server === server)) throw new Error(`an MCP provider named ${server} already exists`);
+	const config = { command: params.mcp.command, args: params.mcp.args ?? [], ...(params.mcp.env ? { env: params.mcp.env } : {}) };
+	// Starting a server is a first use of an external dependency (R2).
+	const approved = await host.approve({ tier: "R2", subject: `mcp:${config.command} ${config.args.join(" ")}`, title: "Connect a new MCP server", detail: `${config.command} ${config.args.join(" ")}` });
+	if (!approved) throw new Error("connecting the MCP server was not approved");
+	const tools = await host.probeMcp(server, config);
+	if (tools.length === 0) throw new Error(`MCP server ${server} exposed no tools`);
+	const toolDefsSha = toolDefsHash(tools as never, server);
+	const hash = mcpProviderHash(config, toolDefsSha);
+	const { store } = host;
+	const gap = listGaps(store, { toolsmithMissionId: host.missionId })[0];
+	store.tx(() => {
+		ensureCapability(store, params.cap, params.semantics);
+		insertProvider(store, {
+			sha256: hash,
+			capId: params.cap,
+			layer: "project",
+			kind: "mcp",
+			name: params.name as string,
+			version: params.version ?? "0.1.0",
+			location: { server, config, toolDefsSha },
+			trust: "candidate",
+			provenance: { mission: host.missionId, gap: gap?.id, tools: tools.map((t) => t.name) },
+		});
+		addEdge(store, "project", params.cap, hash, "implemented_by", { trust: "candidate" });
+		if (gap) updateGap(store, gap.id, { providerSha: hash });
+		audit(store, { actor: `mission:${host.missionId}`, event: "provider_register", decision: "candidate", reason: `${params.cap} ← mcp ${server}@${hash.slice(0, 8)} (${tools.length} tools)` });
+	});
+	return textResult(`Registered MCP server ${server} (${tools.map((t) => t.name).join(", ")}) as a candidate provider of ${params.cap}; tool definitions hash-locked.`, {
+		sha256: hash,
+		server,
+	} as Record<string, string>);
+}
+
 export function createProviderRegisterTool(host: MissionToolHost): ToolDefinition {
 	return defineTool({
 		name: "provider_register",
 		label: "Register Provider",
 		description:
-			"Register a validated Skill as a candidate provider of a capability. It is hashed, copied out of quarantine, and becomes usable only after an independent conformance check promotes it to verified.",
-		promptSnippet: "Register a validated Skill as a candidate provider of a capability",
+			"Register a candidate provider of a capability: a validated Skill (kind skill, copied out of quarantine and hashed) or a stdio MCP server (kind mcp, tool definitions hash-locked). It becomes usable only after an independent conformance check promotes it to verified.",
+		promptSnippet: "Register a validated Skill or MCP server as a candidate provider of a capability",
 		parameters: Type.Object({
-			path: Type.String({ description: "Skill directory inside quarantine/" }),
+			kind: Type.Optional(StringEnum(["skill", "mcp"] as const, { description: "Default skill" })),
+			path: Type.Optional(Type.String({ description: "kind skill: Skill directory inside quarantine/" })),
+			name: Type.Optional(Type.String({ description: "kind mcp: provider name" })),
+			mcp: Type.Optional(
+				Type.Object({ command: Type.String(), args: Type.Optional(Type.Array(Type.String())), env: Type.Optional(Type.Record(Type.String(), Type.String())) }, { description: "kind mcp: stdio server" }),
+			),
 			cap: CAP,
 			semantics: Type.String(),
 			version: Type.Optional(Type.String({ description: "Semantic version, default 0.1.0" })),
 		}),
 		executionMode: "sequential",
 		async execute(_id, params) {
+			if (params.kind === "mcp") return registerMcp(host, params);
+			if (!params.path) throw new Error("kind skill needs path");
 			const src = insideQuarantine(host, params.path);
 			const report = validateSkill(src);
 			if (!report.ok || !report.name) throw new Error(`skill_validate failed:\n- ${report.errors.join("\n- ")}`);
@@ -112,7 +161,7 @@ export function createProviderRegisterTool(host: MissionToolHost): ToolDefinitio
 			});
 			return textResult(
 				`Registered ${report.name}@${hash.slice(0, 8)} as a candidate provider of ${params.cap}. An independent verifier runs its conformance check after you submit.`,
-				{ sha256: hash, path: dest, name: report.name },
+				{ sha256: hash, path: dest, name: report.name } as Record<string, string>,
 			);
 		},
 	});

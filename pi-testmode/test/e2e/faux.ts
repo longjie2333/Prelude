@@ -89,7 +89,7 @@ export interface Router {
 	/** Scripts by actor (`main`, `executor`, `verifier`, `scout`). */
 	scripts: Record<string, Step[]>;
 	/** Requests seen, by actor, with the system prompt each one carried. */
-	seen: Array<{ info: ActorInfo; lastUserText: string; system: string }>;
+	seen: Array<{ info: ActorInfo; lastUserText: string; system: string; raw: string }>;
 	remaining(actor: string): number;
 }
 
@@ -98,7 +98,7 @@ export function createRouter(tmpDir: string, scripts: Record<string, Step[]>): R
 	const seen: Router["seen"] = [];
 	const route = (context: { messages: unknown[] }): AssistantMessage => {
 		const ctx = makeCtx(context.messages as Ctx["messages"]);
-		seen.push({ info: ctx.info, lastUserText: ctx.lastUserText(), system: systemText(ctx.messages) });
+		seen.push({ info: ctx.info, lastUserText: ctx.lastUserText(), system: systemText(ctx.messages), raw: JSON.stringify(context.messages) });
 		const queue = scripts[ctx.info.actor];
 		const step = queue?.shift();
 		if (!step) return fauxAssistantMessage(fauxText(`[faux] no script left for ${ctx.info.actor}`));
