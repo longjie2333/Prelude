@@ -8,9 +8,10 @@ import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 import { canonicalPath, isInside } from "../kernel/paths.ts";
+import type { TestmodePaths } from "../paths.ts";
 import { EnvelopeSchema, type Envelope, validateClaimsAgainstRuns } from "../missions/envelope.ts";
 import type { Store } from "../store/db.ts";
-import { audit, finishTestRun, freezeArtifact, insertTestRunStart, listFrozen, listTestRuns } from "../store/repos.ts";
+import { audit, finishTestRun, freezeArtifact, insertTestRunStart, listFrozen, listTestRuns, type MissionSpecRecord } from "../store/repos.ts";
 import type { Role, Verdict } from "../types.ts";
 import { newId, sha256, textResult, truncate } from "../util.ts";
 import { evidenceUri, putEvidence } from "./evidence.ts";
@@ -23,8 +24,18 @@ export interface MissionToolHost {
 	runDir: string;
 	evidenceDir: string;
 	root: string;
+	paths: TestmodePaths;
+	spec: MissionSpecRecord;
 	/** Called once a valid envelope is submitted; the runner ends the mission. */
 	onSubmit(envelope: Envelope): void;
+	requestCapability?(req: CapabilityRequest): { message: string; gapId?: string };
+}
+
+export interface CapabilityRequest {
+	capId: string;
+	semantics: string;
+	io?: unknown;
+	acceptanceHints?: string[];
 }
 
 const TAIL = 2000;
@@ -148,7 +159,7 @@ export function createMissionSubmitTool(host: MissionToolHost): ToolDefinition {
 			if (!Value.Check(EnvelopeSchema, params)) throw new Error("envelope does not match the schema");
 			const runs = listTestRuns(host.store, host.missionId);
 			const errors = validateClaimsAgainstRuns(params.claims, runs, host.missionId);
-			if (host.role === "verifier") {
+			if (host.role === "verifier" && host.spec.verify) {
 				const own = new Set(runs.map((r) => r.id));
 				if (!params.verification?.length) errors.push("verifier envelopes must include verification entries for each claim");
 				for (const v of params.verification ?? []) {

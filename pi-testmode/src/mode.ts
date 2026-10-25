@@ -7,6 +7,9 @@
  */
 import { join } from "node:path";
 import { type ExtensionAPI, type ExtensionContext, type ExtensionFactory, getAgentDir, ModelRuntime } from "@earendil-works/pi-coding-agent";
+
+/** Name of pi's MCP prompt section (extensions/mcp `MCP_SERVERS_SECTION`, not re-exported from the package root). */
+const MCP_SERVERS_SECTION = "mcp_servers";
 import { Box, Key, Text } from "@earendil-works/pi-tui";
 import { sweepOrphanEvidence } from "./harness/evidence.ts";
 import { canonicalPath } from "./kernel/paths.ts";
@@ -15,7 +18,7 @@ import { policyExtension } from "./kernel/policy-extension.ts";
 import { loadScope } from "./kernel/scope.ts";
 import { MISSION_DONE, Orchestrator, type OrchestratorOptions } from "./orchestrator/orchestrator.ts";
 import questionnaire from "./orchestrator/questionnaire.ts";
-import { createIntentRecordTool, createMissionDispatchTool, createMissionStatusTool, createReportFinalizeTool } from "./orchestrator/tools.ts";
+import { createIntentRecordTool, createKnowledgeSearchTool, createMissionDispatchTool, createMissionStatusTool, createReportFinalizeTool } from "./orchestrator/tools.ts";
 import { resolvePaths, type TestmodePaths } from "./paths.ts";
 import { openStore, type Store } from "./store/db.ts";
 import type { MissionRow } from "./store/repos.ts";
@@ -24,15 +27,16 @@ const STATE_ENTRY = "testmode-state";
 const CUSTOM_PREFIX = "testmode-";
 
 /** Active tools of the main session in test mode (plan §7, I-6: no bash/edit/write). */
-export const TESTMODE_TOOLS = ["read", "grep", "find", "ls", "questionnaire", "intent_record", "mission_dispatch", "mission_status", "report_finalize"];
+export const TESTMODE_TOOLS = ["read", "grep", "find", "ls", "questionnaire", "intent_record", "knowledge_search", "mission_dispatch", "mission_status", "report_finalize"];
 
 export const TESTMODE_SECTION = `<testmode>
 Test mode is active. You are the orchestrator of a testing agent. You do five things only: understand the test intent, analyze the situation, plan missions, dispatch them, and summarize results. You never execute tests yourself; you have no shell and cannot write files.
 
 1. Parse the request into an Intent IR and record it with intent_record. If an ambiguity would change the risk tier or the scope (target environment, whether destructive operations are allowed, which assets), ask with questionnaire first; record every other default you choose as an assumption.
-2. Dispatch missions with mission_dispatch: an executor to test, a scout first when the SUT is unknown. Give each mission concrete targets and the context it needs (docs, reset endpoint, hypotheses). The kernel computes risk tiers; you cannot set them.
-3. After mission_dispatch, end your turn immediately. Do not poll. A message wakes you when results arrive.
-4. When woken, decide whether follow-up missions are needed; otherwise call report_finalize. Only claims marked confirmed by the independent verifier are findings. State assumptions and gaps plainly.
+2. Call knowledge_search for the intent. It returns at most 3 template cards and a hit level (H3 exact, H2 adapted, H1 analogous, H0 none). You only ever see cards; template bodies and tools go to the missions.
+3. Dispatch missions with mission_dispatch: an executor to test (with the applicable card ids as template_ids), a scout first when the SUT is unknown (H0/H1). Give each mission concrete targets and the context it needs (docs, reset endpoint, hypotheses). The kernel computes risk tiers; you cannot set them.
+4. After mission_dispatch, end your turn immediately. Do not poll. A message wakes you when results arrive.
+5. When woken, decide whether follow-up missions are needed (an executor after a scout; one binding a newly verified capability); otherwise call report_finalize. Only claims marked confirmed by the independent verifier are findings. State assumptions and gaps plainly.
 </testmode>`;
 
 interface PersistedState {
@@ -178,7 +182,7 @@ export function createTestmodeExtension(options: TestmodeOptions = {}): Extensio
 				return paths;
 			},
 		};
-		for (const tool of [createIntentRecordTool(host), createMissionDispatchTool(host), createMissionStatusTool(host), createReportFinalizeTool(host)]) {
+		for (const tool of [createIntentRecordTool(host), createKnowledgeSearchTool(host), createMissionDispatchTool(host), createMissionStatusTool(host), createReportFinalizeTool(host)]) {
 			pi.registerTool(tool);
 		}
 		questionnaire(pi);
@@ -261,7 +265,14 @@ export function createTestmodeExtension(options: TestmodeOptions = {}): Extensio
 		});
 
 		pi.on("before_agent_start", (event) => {
-			if (enabled) event.systemPromptOptions.sections.testmode = TESTMODE_SECTION;
+			if (!enabled) return;
+			const opts = event.systemPromptOptions;
+			opts.sections.testmode = TESTMODE_SECTION;
+			// D0/D1 only (M2 acceptance 3): no user skills, no MCP server listings, no late-registered tools.
+			opts.skills = [];
+			delete opts.sections[MCP_SERVERS_SECTION];
+			const active = pi.getActiveTools();
+			if (active.some((t) => !TESTMODE_TOOLS.includes(t))) pi.setActiveTools(TESTMODE_TOOLS);
 		});
 
 		pi.on("agent_settled", () => updateStatus());

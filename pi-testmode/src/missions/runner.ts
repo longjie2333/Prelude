@@ -4,6 +4,7 @@
  * templates, and context files never load into a mission.
  */
 import { existsSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
 import type { Model } from "@earendil-works/pi-ai";
 import {
 	type AgentSession,
@@ -14,7 +15,12 @@ import {
 	SessionManager,
 	SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import { createArtifactFreezeTool, createMissionSubmitTool, createTestRunTool, type MissionToolHost } from "../harness/tools.ts";
+import { quarantineProvider, verifyBinding } from "../capabilities/registry.ts";
+import { createCapabilityRequestTool, createProviderRegisterTool, createSkillValidateTool } from "../capabilities/tools.ts";
+import { type CapabilityRequest, createArtifactFreezeTool, createMissionSubmitTool, createTestRunTool, type MissionToolHost } from "../harness/tools.ts";
+import { renderTemplatesSection } from "../knowledge/render.ts";
+import { getTemplate, listFacets } from "../knowledge/store.ts";
+import { createTemplateProposeTool } from "../learning/curator.ts";
 import type { ApprovalOutcome, ApprovalRequest } from "../kernel/approvals.ts";
 import { BudgetTracker } from "../kernel/budget.ts";
 import { canonicalPath } from "../kernel/paths.ts";
@@ -32,6 +38,9 @@ import { applyResolutions, recoveryNote, resolveOrphans } from "./recovery.ts";
 import { loadRole, renderMissionSpec, roleTools } from "./roles.ts";
 
 export const MAX_RESUMES = 2;
+
+const NL = String.fromCharCode(10);
+const lines = (xs: readonly string[]) => xs.filter(Boolean).join(NL);
 
 export type AbortReason = "shutdown" | "user" | "budget";
 
@@ -59,6 +68,7 @@ export interface RunnerHooks {
 	approve(req: ApprovalRequest): Promise<ApprovalOutcome>;
 	/** Called after the mission's final state is committed. */
 	onMissionEnd(missionId: string): void;
+	requestCapability?(missionId: string, req: CapabilityRequest): { message: string; gapId?: string };
 }
 
 export interface SdkRunnerOptions {
@@ -268,6 +278,16 @@ export class SdkMissionRunner implements MissionRunner {
 			return;
 		}
 
+		// Hash-lock check right before use (M2-6): a changed provider blocks the mission.
+		for (const b of m.spec.bindings ?? []) {
+			const check = verifyBinding(b);
+			if (!check.ok) {
+				quarantineProvider(store, b.sha256, `mission:${m.id}`, check.reason);
+				this.finalize(m, "failed", { cost: m.cost, error: `provider ${b.name}@${b.sha256.slice(0, 8)} for ${b.capId} blocked: ${check.reason}` });
+				return;
+			}
+		}
+
 		const toolHost: MissionToolHost = {
 			store,
 			missionId: m.id,
@@ -275,6 +295,9 @@ export class SdkMissionRunner implements MissionRunner {
 			runDir: m.runDir,
 			evidenceDir: paths.evidenceDir,
 			root: paths.root,
+			paths,
+			spec: m.spec,
+			requestCapability: this.opts.hooks.requestCapability ? (req) => this.opts.hooks.requestCapability?.(m.id, req) ?? { message: "unavailable" } : undefined,
 			onSubmit: (env) => {
 				entry.envelope = env;
 				// Durable before the mission is finalized, so a crash here does not lose the result.
@@ -282,6 +305,11 @@ export class SdkMissionRunner implements MissionRunner {
 			},
 		};
 		const missionSection = renderMissionSpec(m.spec, m.runDir);
+		const extraSections = this.missionSections(m);
+		const skillPaths = [
+			...(m.spec.bindings ?? []).filter((b) => b.kind === "skill" && b.path).map((b) => b.path as string),
+			...(m.spec.conformance ? [m.spec.conformance.providerPath] : []),
+		];
 		const factories: ExtensionFactory[] = [
 			policyExtension({
 				store: () => store,
@@ -291,10 +319,19 @@ export class SdkMissionRunner implements MissionRunner {
 				journal: { missionId: m.id, evidenceDir: paths.evidenceDir },
 			}),
 			(pi) => {
-				const tools = [createTestRunTool(toolHost), createArtifactFreezeTool(toolHost), createMissionSubmitTool(toolHost)];
+				const tools = [
+					createTestRunTool(toolHost),
+					createArtifactFreezeTool(toolHost),
+					createMissionSubmitTool(toolHost),
+					createCapabilityRequestTool(toolHost),
+					createSkillValidateTool(toolHost),
+					createProviderRegisterTool(toolHost),
+					createTemplateProposeTool(toolHost),
+				];
 				for (const t of tools) if (role.tools.includes(t.name)) pi.registerTool(t);
 				pi.on("before_agent_start", (event) => {
 					event.systemPromptOptions.sections.mission = missionSection;
+					for (const [k, v] of Object.entries(extraSections)) event.systemPromptOptions.sections[k] = v;
 				});
 			},
 		];
@@ -317,6 +354,7 @@ export class SdkMissionRunner implements MissionRunner {
 			noPromptTemplates: true,
 			noContextFiles: true,
 			noThemes: true,
+			additionalSkillPaths: skillPaths,
 			systemPrompt: role.systemPrompt,
 			extensionFactories: factories,
 		});
@@ -413,6 +451,62 @@ export class SdkMissionRunner implements MissionRunner {
 				this.finalize(m, "failed", { cost, error: error ?? "ended without mission_submit" });
 			}
 		}
+	}
+
+	/** Role-specific prompt sections: template (D2), facet vocabulary, gap, conformance, curate. */
+	private missionSections(m: MissionRow): Record<string, string> {
+		const { store } = this.opts;
+		const out: Record<string, string> = {};
+		const activated = (m.spec.templates ?? []).flatMap((t) => {
+			const template = getTemplate(store, t.id, t.version);
+			if (!template) return [];
+			return [{ template, exception: template.spec.applicability.exceptions.find((x) => x.id === t.exceptionId) }];
+		});
+		const tpl = renderTemplatesSection(activated, m.spec.bindings ?? [], m.spec.unboundCaps ?? []);
+		if (tpl) out.template = tpl;
+		if (m.role === "scout") {
+			out.facets = lines([
+				"<facets>",
+				"Report mission_submit.fingerprint with these facet names (conf 0-1, src = how you know). A dimension that matters but is not listed may be reported under a new name; it is recorded as proposed.",
+				...listFacets(store, "active").map((f) => `- ${f.name} (${f.type}: ${f.values.join("|")})`),
+				"</facets>",
+			]);
+		}
+		const g = m.spec.gap;
+		if (g) {
+			out.gap = lines([
+				"<gap>",
+				`gap_id: ${g.gapId}`,
+				`capability: ${g.capId}`,
+				`semantics: ${g.semantics}`,
+				g.io ? `io: ${JSON.stringify(g.io)}` : "",
+				...(g.acceptanceHints ?? []).map((h) => `acceptance hint: ${h}`),
+				`Build the provider as a Skill under ${join(m.runDir, "quarantine")}/<name>/, run skill_validate, then provider_register.`,
+				"</gap>",
+			]);
+		}
+		const c = m.spec.conformance;
+		if (c) {
+			out.conformance = lines([
+				"<conformance>",
+				`Candidate provider: skill ${c.providerName} (${c.providerSha.slice(0, 8)}) at ${c.providerPath}`,
+				`Capability: ${c.capId} — ${c.semantics}`,
+				c.io ? `io: ${JSON.stringify(c.io)}` : "",
+				...(c.acceptanceHints ?? []).map((h) => `acceptance hint: ${h}`),
+				"Write your own conformance test with known answers (do not reuse the builder's tests), run it with test_run, and submit a pass claim citing passing runs, or a defect claim if the provider is wrong.",
+				"</conformance>",
+			]);
+		}
+		const k = m.spec.curate;
+		if (k) {
+			out.curate = lines([
+				"<curate>",
+				k.digest,
+				`The kernel fixes the initial boundary (born narrow on this episode's discriminative facets) and the required capabilities (${k.capabilities.join(", ") || "none"}). You supply the method: card, intent_patterns, oracle, procedure (expect = process observations, never oracle values), verdict, body.`,
+				"</curate>",
+			]);
+		}
+		return out;
 	}
 
 	private statusFromEnvelope(env: Envelope): MissionStatus {

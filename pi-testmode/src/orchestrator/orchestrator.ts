@@ -9,7 +9,13 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import type { Model } from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { bindingOf, quarantineProvider, resolveCapabilities, verifyBinding } from "../capabilities/registry.ts";
 import { putEvidence } from "../harness/evidence.ts";
+import type { CapabilityRequest } from "../harness/tools.ts";
+import { judge } from "../knowledge/applicability.ts";
+import { assembleFingerprint, mergeFingerprints } from "../knowledge/fingerprint.ts";
+import { getProvider, getTemplate, insertGap, listEpisodes, listGaps, listProviders, listRetrievals, seedKnowledge, setProviderTrust, updateGap } from "../knowledge/store.ts";
+import { recordEpisode, recordRetrievedUnused } from "../learning/episodes.ts";
 import { type ApprovalOutcome, type ApprovalRequest, type ApprovalUI, Approvals } from "../kernel/approvals.ts";
 import { canonicalPath } from "../kernel/paths.ts";
 import { assessMissionRisk } from "../kernel/risk.ts";
@@ -31,8 +37,8 @@ import {
 	type MissionSpecRecord,
 	updateMission,
 } from "../store/repos.ts";
-import type { Budget, Role } from "../types.ts";
-import { TERMINAL_STATUSES } from "../types.ts";
+import type { Budget, RiskTier, Role } from "../types.ts";
+import { maxTier, RISK_ORDER, TERMINAL_STATUSES } from "../types.ts";
 import { newId, nowIso, sha256 } from "../util.ts";
 import type { IntentIR } from "./intent.ts";
 import { claimViews, needsVerification, verifierOf } from "./verification.ts";
@@ -75,6 +81,10 @@ export interface DispatchRequest {
 	testKinds: TestKind[];
 	context?: string;
 	budget?: { tokens?: number; wall_clock_s?: number };
+	/** Templates to activate (D2), from knowledge_search cards. */
+	templateIds?: string[];
+	/** Extra capabilities to bind beyond the templates' own requirements. */
+	capabilities?: string[];
 }
 
 export type DispatchOutcome =
@@ -116,9 +126,11 @@ export class Orchestrator {
 			hooks: {
 				approve: (req: ApprovalRequest): Promise<ApprovalOutcome> => this.approvals.request(req),
 				onMissionEnd: (id: string) => this.onMissionEnd(id),
+				requestCapability: (id: string, req: CapabilityRequest) => this.requestCapability(id, req),
 			},
 		};
 		this.runner = opts.runnerFactory ? opts.runnerFactory(runnerOpts) : new SdkMissionRunner(runnerOpts);
+		seedKnowledge(opts.store);
 	}
 
 	get store(): Store {
@@ -163,12 +175,45 @@ export class Orchestrator {
 		const scope = loadScope(paths.scopeFile);
 		const outcomes: DispatchOutcome[] = [];
 
+		const { fingerprint } = assembleFingerprint(store, ir);
 		for (const req of requests) {
+			// Template activation (M2-5): the judge decides; the tier floor and capabilities follow the templates.
+			const templates: NonNullable<MissionSpecRecord["templates"]> = [];
+			let floor: RiskTier = "R0";
+			const caps = new Set(req.capabilities ?? []);
+			let refused: string | undefined;
+			for (const tid of req.templateIds ?? []) {
+				const t = getTemplate(store, tid.replace(/@\d+$/, ""));
+				if (!t) {
+					refused = `unknown template ${tid}`;
+					break;
+				}
+				const j = judge(t.spec.applicability, fingerprint);
+				if (j.result === "false") {
+					refused = `${t.id} does not apply here: ${j.reasons.join("; ")}`;
+					break;
+				}
+				templates.push({ id: t.id, version: t.version, exceptionId: j.exception?.id });
+				floor = maxTier(floor, t.spec.risk_tier_floor);
+				for (const c of t.spec.capabilities_required) caps.add(c.cap);
+			}
+			if (refused) {
+				audit(store, { actor: "main", event: "mission_dispatch", decision: "block", reason: refused });
+				outcomes.push({ ok: false, objective: req.objective, reason: refused });
+				continue;
+			}
+			const resolution = resolveCapabilities(store, [...caps], "main");
+			if (resolution.mismatched.length > 0) {
+				const reason = `provider content changed since registration (blocked and quarantined): ${resolution.mismatched.map((x) => `${x.capId} ${x.sha256.slice(0, 8)} — ${x.reason}`).join("; ")}`;
+				outcomes.push({ ok: false, objective: req.objective, reason });
+				continue;
+			}
 			const risk = assessMissionRisk({
 				role: req.role,
 				targets: req.targets,
 				testKinds: req.testKinds,
 				environment: ir.constraints?.environment,
+				templateFloor: floor,
 				scope: scope.scope,
 			});
 			if (!risk.allowed) {
@@ -207,6 +252,9 @@ export class Orchestrator {
 					wallClockMs: req.budget?.wall_clock_s ? req.budget.wall_clock_s * 1000 : base.wallClockMs,
 				},
 				model: this.lastModel,
+				templates: templates.length ? templates : undefined,
+				bindings: resolution.bindings.length ? resolution.bindings : undefined,
+				unboundCaps: resolution.missing.length ? resolution.missing : undefined,
 			};
 			this.insertAndStart(spec);
 			outcomes.push({ ok: true, missionId, role: req.role, tier: risk.tier, reasons: risk.reasons });
@@ -295,16 +343,195 @@ export class Orchestrator {
 
 	private onMissionEnd(missionId: string): void {
 		if (this.closed) return;
-		const m = getMission(this.opts.store, missionId);
+		const { store } = this.opts;
+		const m = getMission(store, missionId);
 		if (!m) return;
-		if (m.status === "completed" && needsVerification(m) && !verifierOf(this.opts.store, m.id)) {
+		const step = (what: string, fn: () => void) => {
 			try {
-				this.dispatchVerifier(m);
+				fn();
 			} catch (err) {
-				audit(this.opts.store, { actor: "main", event: "verifier_dispatch_failed", reason: `${m.id}: ${(err as Error).message}` });
+				audit(store, { actor: "main", event: `${what}_failed`, reason: `${m.id}: ${(err as Error).message}` });
 			}
-		}
+		};
+		if (TERMINAL_STATUSES.includes(m.status) || m.status === "blocked") step("episode", () => recordEpisode(store, m));
+		if (m.role === "executor" && m.status === "completed" && needsVerification(m) && !verifierOf(store, m.id)) step("verifier_dispatch", () => this.dispatchVerifier(m));
+		if (m.role === "toolsmith" && TERMINAL_STATUSES.includes(m.status)) step("conformance_dispatch", () => this.afterToolsmith(m));
+		if (m.role === "verifier" && m.spec.conformance && TERMINAL_STATUSES.includes(m.status)) step("promotion", () => this.afterConformance(m));
+		if (m.role === "curator") updateMission(store, m.id, { notifiedAt: m.notifiedAt ?? nowIso() });
 		this.scheduleFlush();
+	}
+
+	// ------------------------------------------------------------ capabilities (M2-6)
+
+	/** A mission filed a capability gap: dispatch a Toolsmith in the background. */
+	requestCapability(missionId: string, req: CapabilityRequest): { message: string; gapId?: string } {
+		const { store, paths } = this.opts;
+		const m = getMission(store, missionId);
+		if (!m) return { message: "unknown mission" };
+		const open = listGaps(store, { capId: req.capId }).find((g) => g.status === "open" || g.status === "acquiring");
+		if (open) return { message: `${req.capId} is already being acquired (gap ${open.id}); continue without it.`, gapId: open.id };
+		if (listProviders(store, { capId: req.capId, trust: ["verified", "pinned"] }).length > 0) {
+			return { message: `${req.capId} already has a verified provider; ask for it to be bound in the next mission (mission_dispatch capabilities).` };
+		}
+		const gapId = newId("g");
+		const toolsmithId = newId("m");
+		const risk = assessMissionRisk({ role: "toolsmith", targets: m.spec.targets, testKinds: ["functional"], scope: loadScope(paths.scopeFile).scope });
+		const spec: MissionSpecRecord = {
+			missionId: toolsmithId,
+			intentId: m.intentId,
+			role: "toolsmith",
+			objective: `Provide ${req.capId}: ${req.semantics}`,
+			targets: m.spec.targets,
+			testKinds: ["functional"],
+			riskTier: risk.tier,
+			riskReasons: risk.reasons,
+			budget: DEFAULT_BUDGETS.toolsmith,
+			model: m.spec.model,
+			gap: { gapId, capId: req.capId, semantics: req.semantics, io: req.io, acceptanceHints: req.acceptanceHints },
+		};
+		store.tx(() => {
+			insertGap(store, { id: gapId, requestedBy: m.id, capId: req.capId, spec: { semantics: req.semantics, io: req.io, acceptance_hints: req.acceptanceHints } });
+			audit(store, { actor: `mission:${m.id}`, event: "capability_request", decision: risk.allowed && !risk.requiresApproval ? "allow" : "block", reason: `${gapId} ${req.capId}` });
+			if (!risk.allowed || risk.requiresApproval) updateGap(store, gapId, { status: "failed" });
+		});
+		if (!risk.allowed || risk.requiresApproval) {
+			return { message: `Recorded gap ${gapId}, but a Toolsmith cannot run here (${risk.denyReason ?? `${risk.tier} needs approval`}). Continue without it and list it in capability_issues.`, gapId };
+		}
+		this.insertAndStart(spec, m.id);
+		updateGap(store, gapId, { status: "acquiring", toolsmithMissionId: toolsmithId });
+		return { message: `Recorded gap ${gapId}; Toolsmith ${toolsmithId} is acquiring ${req.capId} in the background. Continue without it and list it in capability_issues.`, gapId };
+	}
+
+	private afterToolsmith(t: MissionRow): void {
+		const { store } = this.opts;
+		const gap = listGaps(store, { toolsmithMissionId: t.id })[0];
+		if (!gap) return;
+		const provider = gap.providerSha ? getProvider(store, gap.providerSha) : undefined;
+		if (t.status !== "completed" || !provider?.location.path) {
+			updateGap(store, gap.id, { status: "failed" });
+			audit(store, { actor: "main", event: "capability_failed", reason: `${gap.id} ${gap.capId}: toolsmith ${t.status}${provider ? "" : ", no provider registered"}` });
+			return;
+		}
+		// Conformance is written by a different role than the builder (agent-core §9.4).
+		const missionId = newId("m");
+		const spec: MissionSpecRecord = {
+			missionId,
+			intentId: t.intentId,
+			role: "verifier",
+			objective: `Conformance check of ${provider.name}@${provider.sha256.slice(0, 8)} for ${gap.capId}`,
+			targets: t.spec.targets,
+			testKinds: ["functional"],
+			riskTier: t.riskTier,
+			riskReasons: [`conformance of ${t.id}'s provider`],
+			budget: DEFAULT_BUDGETS.verifier,
+			model: t.spec.model,
+			conformance: {
+				gapId: gap.id,
+				capId: gap.capId,
+				semantics: gap.spec.semantics,
+				io: gap.spec.io,
+				acceptanceHints: gap.spec.acceptance_hints,
+				providerSha: provider.sha256,
+				providerPath: provider.location.path,
+				providerName: provider.name,
+			},
+		};
+		this.insertAndStart(spec, t.id);
+	}
+
+	/** Promotion is computed from the conformance verifier's own test runs, not its wording. */
+	private afterConformance(v: MissionRow): void {
+		const { store } = this.opts;
+		const c = v.spec.conformance;
+		if (!c) return;
+		const env = v.envelope as Envelope | null;
+		const decided = listTestRuns(store, v.id).filter((r) => r.verdict === "pass" || r.verdict === "fail");
+		const passed = decided.filter((r) => r.verdict === "pass").length;
+		const score = decided.length ? passed / decided.length : 0;
+		const binding = bindingOf(store, c.providerSha, c.capId);
+		const intact = binding ? verifyBinding(binding) : { ok: false as const, reason: "provider missing" };
+		const ok = v.status === "completed" && !!env?.claims.some((x) => x.type === "pass") && !env.claims.some((x) => x.type === "defect") && score >= 0.9 && intact.ok;
+		if (!intact.ok) quarantineProvider(store, c.providerSha, "main", intact.reason);
+		store.tx(() => {
+			if (ok) setProviderTrust(store, c.providerSha, "verified", score);
+			updateGap(store, c.gapId, { status: ok ? "resolved" : "failed" });
+			audit(store, {
+				actor: "main",
+				event: ok ? "provider_verified" : "provider_rejected",
+				decision: ok ? "verified" : "candidate",
+				reason: `${c.capId} ← ${c.providerName}@${c.providerSha.slice(0, 8)} conformance ${passed}/${decided.length}`,
+			});
+		});
+	}
+
+	// ------------------------------------------------------------ curator (M2-8)
+
+	/** After report_finalize: retrieved-unused records, and a background Curator for H0/H1 successes. */
+	afterIntentClosed(intentId: string): string | undefined {
+		const { store } = this.opts;
+		recordRetrievedUnused(store, intentId);
+		const intent = getIntent(store, intentId);
+		if (!intent || (intent.hitLevel !== "H0" && intent.hitLevel !== "H1" && intent.hitLevel !== null)) return undefined;
+		const executors = listMissions(store, { intentId }).filter((m) => m.role === "executor" && m.status === "completed");
+		const confirmed = executors.filter((m) => claimViews(store, m).some((v) => v.status === "confirmed"));
+		if (confirmed.length === 0) return undefined;
+		return this.dispatchCurator(intentId, confirmed);
+	}
+
+	private dispatchCurator(intentId: string, executors: MissionRow[]): string {
+		const { store } = this.opts;
+		const intent = getIntent(store, intentId) as NonNullable<ReturnType<typeof getIntent>>;
+		const episodes = listEpisodes(store, { intentId }).filter((e) => executors.some((x) => x.id === e.missionId));
+		const fingerprint = mergeFingerprints(...episodes.map((e) => e.fingerprint));
+		const capabilities = [
+			...executors.flatMap((m) => (m.spec.bindings ?? []).map((b) => b.capId)),
+			...listMissions(store, { intentId }).flatMap((m) => listGaps(store, { requestedBy: m.id }).filter((g) => g.status === "resolved").map((g) => g.capId)),
+		];
+		const riskFloor = executors.map((m) => m.riskTier).sort((a, b) => RISK_ORDER.indexOf(a) - RISK_ORDER.indexOf(b))[0] ?? "R0";
+		const views = executors.flatMap((m) => claimViews(store, m));
+		const evidenceKinds = [
+			...(views.some((v) => v.claim.type === "defect" && v.status === "confirmed") ? ["minimal_repro"] : []),
+			...(executors.some((m) => listFrozen(store, m.id).length > 0) ? ["frozen_script"] : []),
+			"independent_replay",
+		];
+		const recalled = listRetrievals(store, intentId).flatMap((r) => r.cards).slice(0, 3);
+		const digest = [
+			`intent: ${intent.raw}`,
+			`hit level: ${intent.hitLevel ?? "H0"}`,
+			...executors.map((m) => {
+				const env = m.envelope as Envelope;
+				const runs = listTestRuns(store, m.id).map((r) => `${r.command} → ${r.verdict}`);
+				return [
+					`executor ${m.id}: ${m.objective}`,
+					`  summary: ${env.summary}`,
+					...claimViews(store, m).map((v) => `  claim [${v.claim.type}, ${v.status}] ${v.claim.statement}${v.claim.oracle ? ` (oracle ${v.claim.oracle.kind})` : ""}`),
+					...(env.deviations ?? []).map((d) => `  deviation @${d.at}: expected ${d.expected}; observed ${d.observed}`),
+					...runs.map((r) => `  test_run: ${r}`),
+				].join("\n");
+			}),
+			`fingerprint: ${Object.entries(fingerprint).map(([k, v]) => `${k}=${v.values.join("|")}`).join(", ")}`,
+			recalled.length ? `existing templates you may compose: ${recalled.map((c) => c.id).join(", ")}` : "",
+		]
+			.filter(Boolean)
+			.join("\n");
+		const missionId = newId("m");
+		const spec: MissionSpecRecord = {
+			missionId,
+			intentId,
+			role: "curator",
+			objective: `Distill a draft template from intent ${intentId}`,
+			targets: [],
+			testKinds: [],
+			riskTier: "R0",
+			riskReasons: ["curator writes only the draft area"],
+			budget: DEFAULT_BUDGETS.curator,
+			model: executors[0].spec.model,
+			curate: { episodeIds: episodes.map((e) => e.id), fingerprint, capabilities: [...new Set(capabilities)], riskFloor, evidenceKinds, digest },
+		};
+		this.insertAndStart(spec);
+		// Silent: the curator never wakes the main session.
+		updateMission(store, missionId, { notifiedAt: nowIso() });
+		return missionId;
 	}
 
 	private scheduleFlush(delay = this.opts.notifyDebounceMs ?? 500): void {
@@ -317,20 +544,34 @@ export class Orchestrator {
 		this.flushTimer.unref?.();
 	}
 
-	/** Missions whose end has not been delivered to the main session yet (outbox). */
+	/** A mission is settled when it and all its descendants have stopped moving on their own. */
+	private settled(m: MissionRow, children: Map<string, MissionRow[]>): boolean {
+		const own = TERMINAL_STATUSES.includes(m.status) || m.status === "blocked" || m.status === "interrupted";
+		return own && (children.get(m.id) ?? []).every((c) => this.settled(c, children));
+	}
+
+	private childrenMap(): Map<string, MissionRow[]> {
+		const children = new Map<string, MissionRow[]>();
+		for (const m of listMissions(this.opts.store)) if (m.parentId) children.set(m.parentId, [...(children.get(m.parentId) ?? []), m]);
+		return children;
+	}
+
+	private descendants(id: string, children: Map<string, MissionRow[]>): MissionRow[] {
+		return (children.get(id) ?? []).flatMap((c) => [c, ...this.descendants(c.id, children)]);
+	}
+
+	/**
+	 * Root missions whose end has not been delivered yet (outbox). A root waits for its whole
+	 * subtree (verifier, toolsmith, conformance check) so the main session wakes once per result.
+	 */
 	pendingNotifications(): MissionRow[] {
-		const { store } = this.opts;
-		const ended = listMissions(store, { statuses: [...TERMINAL_STATUSES, "blocked", "interrupted"] }).filter((m) => !m.notifiedAt);
-		return ended.filter((m) => {
+		const children = this.childrenMap();
+		return listMissions(this.opts.store).filter((m) => {
+			if (m.parentId || m.notifiedAt || m.role === "curator") return false;
+			if (!this.settled(m, children)) return false;
 			if (m.status === "aborted" && m.interruptReason === "shutdown") return false; // offered on re-entry instead
 			if (m.status === "interrupted" && m.interruptReason !== "network") return false; // crash recovery menu
 			if (m.status === "blocked" && !m.envelope && m.error?.startsWith("side effects")) return false; // recovery menu
-			if (m.role === "verifier" && m.parentId) return false; // reported with its executor
-			if (m.role === "executor" && m.status === "completed" && needsVerification(m)) {
-				const v = verifierOf(store, m.id);
-				if (!v) return false; // about to be dispatched
-				if (!TERMINAL_STATUSES.includes(v.status) && v.status !== "blocked") return false;
-			}
 			return true;
 		});
 	}
@@ -344,26 +585,29 @@ export class Orchestrator {
 		const details = { missions: due.map((m) => ({ id: m.id, intentId: m.intentId, role: m.role, status: m.status })) };
 		if (!this.main.notify(content, details)) return 0;
 		const ts = nowIso();
+		const children = this.childrenMap();
 		store.tx(() => {
-			for (const m of due) {
-				updateMission(store, m.id, { notifiedAt: ts });
-				const v = m.role === "executor" ? verifierOf(store, m.id) : undefined;
-				if (v) updateMission(store, v.id, { notifiedAt: ts });
-			}
+			for (const m of due) for (const x of [m, ...this.descendants(m.id, children)]) if (!x.notifiedAt) updateMission(store, x.id, { notifiedAt: ts });
 			audit(store, { actor: "main", event: "wake", reason: due.map((m) => m.id).join(",") });
 		});
 		return due.length;
 	}
 
 	missionSummary(m: MissionRow): string {
+		const { store } = this.opts;
 		const env = m.envelope as Envelope | null;
 		const lines = [`- ${m.id} (${m.role}, ${m.riskTier}) → ${m.status}${m.interruptReason ? `/${m.interruptReason}` : ""}${m.error ? `: ${m.error}` : ""}`];
 		if (env?.summary) lines.push(`  summary: ${env.summary}`);
-		for (const v of claimViews(this.opts.store, m)) {
+		for (const t of m.spec.templates ?? []) lines.push(`  - template ${t.id}@${t.version}${t.exceptionId ? ` (exception ${t.exceptionId})` : ""}`);
+		for (const v of claimViews(store, m)) {
 			const tag = v.status === "not_applicable" ? v.claim.type : `${v.claim.type}, ${v.status}`;
 			lines.push(`  - [${tag}] ${v.claim.statement}`);
 		}
 		for (const d of env?.deviations ?? []) lines.push(`  - deviation @${d.at}: expected "${d.expected}", observed "${d.observed}"`);
+		for (const g of listGaps(store, { requestedBy: m.id })) {
+			const p = g.providerSha ? getProvider(store, g.providerSha) : undefined;
+			lines.push(`  - capability ${g.capId}: ${g.status}${p ? ` (provider ${p.name}@${p.sha256.slice(0, 8)}, ${p.trust})` : ""}`);
+		}
 		return lines.join("\n");
 	}
 

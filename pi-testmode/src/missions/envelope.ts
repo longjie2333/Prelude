@@ -5,6 +5,7 @@
  */
 import { StringEnum } from "@earendil-works/pi-ai";
 import { type Static, Type } from "typebox";
+import { FingerprintEntrySchema } from "../knowledge/schema.ts";
 import type { TestRunRow } from "../store/repos.ts";
 import type { Verdict } from "../types.ts";
 
@@ -52,6 +53,14 @@ export const EnvelopeSchema = Type.Object({
 			}),
 			{ description: "Verifier only: which of your own test_runs re-checked each claim" },
 		),
+	),
+	fingerprint: Type.Optional(
+		Type.Array(FingerprintEntrySchema, { description: "Scout: situation fingerprint, using the facet names listed in your mission" }),
+	),
+	used_templates: Type.Optional(
+		Type.Array(Type.Object({ id: Type.String(), role: StringEnum(["applied", "cited"] as const) }), {
+			description: "Templates you followed (applied) or borrowed from (cited)",
+		}),
 	),
 	self_assessment: Type.Optional(Type.String({ description: "For reference only; not used in scoring" })),
 });

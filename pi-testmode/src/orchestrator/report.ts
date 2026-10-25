@@ -4,6 +4,7 @@
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
+import { edges, getEpisodeByMission, getProvider, listGaps, listTemplateUses } from "../knowledge/store.ts";
 import type { Envelope } from "../missions/envelope.ts";
 import type { TestmodePaths } from "../paths.ts";
 import type { Store } from "../store/db.ts";
@@ -42,6 +43,48 @@ function addCost(a: Cost, b: Cost): Cost {
 
 function fmtCost(c: Cost): string {
 	return `${c.tokens.toLocaleString("en-US")} tokens, $${c.costUsd.toFixed(4)}, ${(c.wallClockMs / 1000).toFixed(1)}s`;
+}
+
+export function intentCost(store: Store, intentId: string): Cost {
+	return listMissions(store, { intentId }).reduce((acc, m) => addCost(acc, m.cost), { ...EMPTY_COST });
+}
+
+/** Templates used, capabilities acquired, and cost against the run a reused template came from. */
+function knowledgeSection(store: Store, intentId: string, hitLevel: string | null, missions: MissionRow[]): string[] {
+	const out = ["## Templates and capabilities", "", `Hit level: ${hitLevel ?? "not searched"}`];
+	const used = new Map<string, { version: number; roles: Set<string> }>();
+	for (const m of missions) {
+		const ep = getEpisodeByMission(store, m.id);
+		if (!ep) continue;
+		for (const u of listTemplateUses(store, { episodeId: ep.id })) {
+			const k = `${u.templateId}@${u.version}`;
+			const e = used.get(k) ?? { version: u.version, roles: new Set<string>() };
+			e.roles.add(u.role);
+			used.set(k, e);
+		}
+	}
+	if (used.size === 0) out.push("- No templates used.");
+	for (const [k, v] of used) out.push(`- ${k}: ${[...v.roles].join(", ")}`);
+	for (const m of missions) {
+		for (const b of m.spec.bindings ?? []) out.push(`- ${m.id} bound ${b.capId} → ${b.name}@${b.sha256.slice(0, 8)}`);
+		for (const g of listGaps(store, { requestedBy: m.id })) {
+			const p = g.providerSha ? getProvider(store, g.providerSha) : undefined;
+			out.push(`- acquired ${g.capId}: ${g.status}${p ? ` → ${p.name}@${p.sha256.slice(0, 8)} (${p.trust}${p.conformanceScore !== null ? `, conformance ${p.conformanceScore}` : ""})` : ""}`);
+		}
+	}
+	// Cost against the intent each reused template was distilled from.
+	const now = intentCost(store, intentId);
+	for (const [k] of used) {
+		const tid = k.replace(/@\d+$/, "");
+		const origin = edges(store, { src: tid, kind: "derived_from" }).find((e) => e.dst.startsWith("intent:"));
+		const originId = origin?.dst.slice("intent:".length);
+		if (!originId || originId === intentId) continue;
+		const before = intentCost(store, originId);
+		if (before.tokens > 0) {
+			out.push(`- cost vs. ${originId} (where ${tid} was distilled): ${now.tokens.toLocaleString("en-US")} vs ${before.tokens.toLocaleString("en-US")} tokens (${Math.round((now.tokens / before.tokens) * 100)}%)`);
+		}
+	}
+	return out;
 }
 
 export function buildReport(store: Store, paths: TestmodePaths, input: ReportInput): ReportResult {
@@ -123,6 +166,8 @@ export function buildReport(store: Store, paths: TestmodePaths, input: ReportInp
 	];
 	out.push("## Not covered", "");
 	out.push(...(notCovered.length ? notCovered.map((n) => `- ${n}`) : ["- Nothing outstanding."]), "");
+
+	out.push(...knowledgeSection(store, input.intentId, intent.hitLevel, missions), "");
 
 	out.push("## Isolation level", "", input.isolation, "");
 

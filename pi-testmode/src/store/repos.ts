@@ -1,3 +1,5 @@
+import type { CapabilityBinding } from "../capabilities/registry.ts";
+import type { CurateInput } from "../learning/curator.ts";
 import type { Actor, Budget, Cost, EffectClass, InterruptReason, MissionStatus, RiskTier, Role, Verdict } from "../types.ts";
 import { EMPTY_COST } from "../types.ts";
 import { nowIso } from "../util.ts";
@@ -11,6 +13,7 @@ export interface IntentRow {
 	ir: unknown;
 	status: "open" | "closed";
 	reportPath: string | null;
+	hitLevel: string | null;
 	createdAt: string;
 	closedAt: string | null;
 }
@@ -33,6 +36,7 @@ export function getIntent(s: Store, id: string): IntentRow | undefined {
 		ir: JSON.parse(r.ir_json as string),
 		status: r.status as IntentRow["status"],
 		reportPath: r.report_path,
+		hitLevel: r.hit_level ?? null,
 		createdAt: r.created_at as string,
 		closedAt: r.closed_at,
 	};
@@ -89,7 +93,26 @@ export interface MissionSpecRecord {
 	model?: { provider: string; id: string };
 	/** Verifier only: the claims to re-check and where to find what the executor froze. */
 	verify?: VerifyInput;
-	templateIds?: string[];
+	/** Activated templates (D2), with the exception that fired for this mission, if any. */
+	templates?: Array<{ id: string; version: number; exceptionId?: string }>;
+	/** Providers bound to this mission, hash-locked at dispatch. */
+	bindings?: CapabilityBinding[];
+	/** Required capabilities with no verified provider. */
+	unboundCaps?: string[];
+	/** Toolsmith only: the capability gap to fill. */
+	gap?: GapInput;
+	/** Conformance verifier only: the candidate provider under test. */
+	conformance?: GapInput & { providerSha: string; providerPath: string; providerName: string };
+	/** Curator only. */
+	curate?: CurateInput;
+}
+
+export interface GapInput {
+	gapId: string;
+	capId: string;
+	semantics: string;
+	io?: unknown;
+	acceptanceHints?: string[];
 }
 
 export interface VerifyInput {

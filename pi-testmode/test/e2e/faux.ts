@@ -33,7 +33,7 @@ function textOf(content: unknown): string {
 	return "";
 }
 
-export function identify(messages: Ctx["messages"]): ActorInfo {
+export function sectionsOf(messages: Ctx["messages"]): Record<string, string> {
 	const sections: Record<string, string> = {};
 	for (const m of messages) {
 		if (m.role !== "system" || !m.sections) continue;
@@ -42,10 +42,22 @@ export function identify(messages: Ctx["messages"]): ActorInfo {
 			else sections[k] = v;
 		}
 	}
+	return sections;
+}
+
+/** Everything the model was told as system prompt (base text and sections). */
+export function systemText(messages: Ctx["messages"]): string {
+	const base = messages.filter((m) => m.role === "system").map((m) => textOf(m.content));
+	return [...base, ...Object.values(sectionsOf(messages))].join("\n");
+}
+
+export function identify(messages: Ctx["messages"]): ActorInfo {
+	const sections = sectionsOf(messages);
 	if (sections.mission) {
 		const get = (key: string) => sections.mission.match(new RegExp(`^${key}: (.+?)(?:\\s+#.*)?$`, "m"))?.[1]?.trim();
 		const role = get("role");
-		return { actor: role ?? "mission", role, missionId: get("mission_id"), runDir: get("run_dir") };
+		const actor = role === "verifier" && sections.conformance ? "verifier:conformance" : (role ?? "mission");
+		return { actor, role, missionId: get("mission_id"), runDir: get("run_dir") };
 	}
 	return { actor: sections.testmode ? "main" : "plain" };
 }
@@ -76,8 +88,8 @@ export interface Router {
 	model: () => Model<string>;
 	/** Scripts by actor (`main`, `executor`, `verifier`, `scout`). */
 	scripts: Record<string, Step[]>;
-	/** Requests seen, by actor. */
-	seen: Array<{ info: ActorInfo; lastUserText: string }>;
+	/** Requests seen, by actor, with the system prompt each one carried. */
+	seen: Array<{ info: ActorInfo; lastUserText: string; system: string }>;
 	remaining(actor: string): number;
 }
 
@@ -86,7 +98,7 @@ export function createRouter(tmpDir: string, scripts: Record<string, Step[]>): R
 	const seen: Router["seen"] = [];
 	const route = (context: { messages: unknown[] }): AssistantMessage => {
 		const ctx = makeCtx(context.messages as Ctx["messages"]);
-		seen.push({ info: ctx.info, lastUserText: ctx.lastUserText() });
+		seen.push({ info: ctx.info, lastUserText: ctx.lastUserText(), system: systemText(ctx.messages) });
 		const queue = scripts[ctx.info.actor];
 		const step = queue?.shift();
 		if (!step) return fauxAssistantMessage(fauxText(`[faux] no script left for ${ctx.info.actor}`));

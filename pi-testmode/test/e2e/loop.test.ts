@@ -172,8 +172,10 @@ describe("test mode loop", () => {
 		await waitFor(() => getIntent(p.store, intentId)?.status === "closed", 45_000);
 		await waitFor(() => router.remaining("main") === 0 && session?.isStreaming === false, 10_000);
 
-		const missions = listMissions(p.store, { intentId });
+		// No knowledge_search ran, so the intent counts as H0 and a silent curator follows (M2-8).
+		const missions = listMissions(p.store, { intentId }).filter((m) => m.role !== "curator");
 		expect(missions.map((m) => `${m.role}:${m.status}`).sort()).toEqual(["executor:completed", "verifier:completed"]);
+		expect(listMissions(p.store, { intentId }).filter((m) => m.role === "curator")).toHaveLength(1);
 		const verifier = missions.find((m) => m.role === "verifier");
 		expect(verifier?.parentId).toBe(missions.find((m) => m.role === "executor")?.id);
 		expect(listTestRuns(p.store, verifier?.id as string).every((r) => r.verdict === "fail")).toBe(true);

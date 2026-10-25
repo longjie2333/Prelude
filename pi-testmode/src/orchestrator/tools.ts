@@ -4,10 +4,14 @@ import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 import { TEST_KINDS } from "../kernel/scope.ts";
+import { assembleFingerprint } from "../knowledge/fingerprint.ts";
+import { renderCards, searchTemplates } from "../knowledge/retrieval.ts";
+import { FingerprintEntrySchema } from "../knowledge/schema.ts";
+import { insertRetrieval } from "../knowledge/store.ts";
 import type { TestmodePaths } from "../paths.ts";
 import { audit, closeIntent, getIntent, getMission, insertIntent, listMissions } from "../store/repos.ts";
 import { newId, textResult } from "../util.ts";
-import { IntentIRSchema, intentProblems } from "./intent.ts";
+import { type IntentIR, IntentIRSchema, intentProblems } from "./intent.ts";
 import type { Orchestrator } from "./orchestrator.ts";
 import { buildReport } from "./report.ts";
 
@@ -55,6 +59,8 @@ const DispatchParams = Type.Object({
 			test_kinds: Type.Array(StringEnum(TEST_KINDS), { description: "Operations needed: functional, load, security-check, destructive" }),
 			context: Type.Optional(Type.String({ description: "What the mission needs to know: SUT docs, reset endpoint, hypotheses" })),
 			budget: Type.Optional(Type.Object({ tokens: Type.Optional(Type.Number()), wall_clock_s: Type.Optional(Type.Number()) })),
+			template_ids: Type.Optional(Type.Array(Type.String(), { description: "Template ids from knowledge_search cards to activate in this mission" })),
+			capabilities: Type.Optional(Type.Array(Type.String(), { description: "Extra capability ids to bind (cap:…)" })),
 		}),
 		{ minItems: 1 },
 	),
@@ -85,6 +91,8 @@ export function createMissionDispatchTool(host: MainToolHost): ToolDefinition {
 					testKinds: m.test_kinds,
 					context: m.context,
 					budget: m.budget,
+					templateIds: m.template_ids,
+					capabilities: m.capabilities,
 				})),
 				ctx.model,
 			);
@@ -165,10 +173,49 @@ export function createReportFinalizeTool(host: MainToolHost): ToolDefinition {
 				closeIntent(o.store, params.intent_id, r.path);
 				audit(o.store, { actor: "main", event: "report_finalize", reason: `${params.intent_id}: ${r.path}` });
 			});
+			const curator = o.afterIntentClosed(params.intent_id);
 			return textResult(
-				`Report written: ${r.path}\nconfirmed defects: ${r.confirmedDefects}, confirmed passes: ${r.confirmedPasses}, not confirmed: ${r.unconfirmed}`,
+				`Report written: ${r.path}\nconfirmed defects: ${r.confirmedDefects}, confirmed passes: ${r.confirmedPasses}, not confirmed: ${r.unconfirmed}${curator ? `\nA curator (${curator}) distills a draft template in the background.` : ""}`,
 				{ path: r.path, confirmedDefects: r.confirmedDefects, confirmedPasses: r.confirmedPasses, unconfirmed: r.unconfirmed },
 			);
+		},
+	});
+}
+
+const GUIDANCE: Record<string, string> = {
+	H3: "Dispatch an executor with the top strategy as template_ids.",
+	H2: "Dispatch an executor with the top strategy as template_ids; it runs the listed probes first. If the SUT is unknown, dispatch a scout first.",
+	H1: "Dispatch a scout to learn the SUT, then an executor; applicable slot templates may be passed as template_ids.",
+	H0: "Dispatch a scout to learn the SUT, then an executor; applicable slot templates may be passed as template_ids.",
+};
+
+export function createKnowledgeSearchTool(host: MainToolHost): ToolDefinition {
+	return defineTool({
+		name: "knowledge_search",
+		label: "Search Knowledge",
+		description:
+			"Find test templates that apply to an intent. Returns at most 3 cards and a hit level: H3 exact (stable template applies), H2 adapted (applies, but probe or check first), H1 analogous (only related templates), H0 none.",
+		promptSnippet: "Find applicable test templates (≤3 cards) and the hit level for an intent",
+		promptGuidelines: ["Use knowledge_search after intent_record and before mission_dispatch; pass applicable card ids to mission_dispatch as template_ids."],
+		parameters: Type.Object({
+			intent_id: Type.String(),
+			query: Type.Optional(Type.String({ description: "Search text; defaults to the intent and its hypotheses" })),
+			facets: Type.Optional(Type.Array(FingerprintEntrySchema, { description: "Facts about the SUT you already know" })),
+		}),
+		defaultActive: false,
+		async execute(_id, params) {
+			const o = host.orchestrator();
+			const intent = getIntent(o.store, params.intent_id);
+			if (!intent) throw new Error(`unknown intent ${params.intent_id}`);
+			const ir = intent.ir as IntentIR;
+			const query = params.query ?? [intent.raw, ...(ir.goal?.hypotheses ?? [])].join(" ");
+			const { fingerprint } = assembleFingerprint(o.store, ir, params.facets ?? []);
+			const r = searchTemplates(o.store, query, fingerprint);
+			o.store.tx(() => {
+				insertRetrieval(o.store, { id: newId("rt"), intentId: intent.id, query, fingerprint, hitLevel: r.hitLevel, cards: r.cards });
+				audit(o.store, { actor: "main", event: "knowledge_search", reason: `${intent.id}: ${r.hitLevel} [${r.cards.map((c) => c.id).join(", ")}]` });
+			});
+			return textResult(`hit level: ${r.hitLevel}\n${renderCards(r)}\n${GUIDANCE[r.hitLevel]}`, { hitLevel: r.hitLevel, cards: r.cards });
 		},
 	});
 }
