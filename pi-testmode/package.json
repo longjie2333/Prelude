@@ -1,0 +1,34 @@
+{
+  "name": "pi-testmode",
+  "version": "0.1.0",
+  "description": "Self-evolving test mode for pi: intent -> missions -> verified report",
+  "type": "module",
+  "keywords": ["pi-package"],
+  "pi": { "extensions": ["./src/index.ts"] },
+  "engines": { "node": ">=22.19.0" },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:unit": "vitest run test/unit",
+    "test:e2e": "vitest run test/e2e",
+    "canary": "node canary/server.mjs"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-agent-core": "*",
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  },
+  "optionalDependencies": { "@anthropic-ai/sandbox-runtime": "0.0.26" },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "1.4.0",
+    "@earendil-works/pi-agent-core": "1.4.0",
+    "@earendil-works/pi-ai": "1.4.0",
+    "@earendil-works/pi-tui": "1.4.0",
+    "typebox": "1.3.27",
+    "typescript": "5.9.3",
+    "vitest": "4.1.11",
+    "@types/node": "22.19.19"
+  }
+}

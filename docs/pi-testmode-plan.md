@@ -50,6 +50,11 @@
 | 测试替身 | `@earendil-works/pi-ai`：`fauxProvider()`、`fauxAssistantMessage`、`fauxToolCall`、`fauxText` | 确定性 e2e |
 | 运行时 | Node ≥ 22.19；Windows 上内置 `powershell` 工具 | — |
 | 模型运行时 | `ModelRegistry` 的 runtime 是私有字段，Mission 需自行调用 `ModelRuntime.create({ authPath, modelsPath })`（读取同一个 `agentDir`） | Mission 鉴权 |
+| faux 接入（M1 实测） | `ModelRuntime.create({ authPath, modelsPath: null, refreshOnCreate: false })` 后调用 `runtime.registerNativeProvider(faux.provider)`，模型取 `faux.getModel()`；`setResponses` 可传函数，按请求上下文路由 | e2e |
+| 会话关闭（M1 实测） | `session.dispose()` **不**触发 `session_shutdown`；只有 `AgentSessionRuntime.dispose()` 和会话替换会触发。SDK 宿主需自行 `session.extensionRunner.emit({ type: "session_shutdown", reason })` | e2e、Mission 收尾 |
+| 恢复续跑（M1 实测） | `SessionManager.open(path, runDir, cwd)` 后先 `appendMessage(toolResult)` 再 `createAgentSession({ sessionManager })`，可以直接续跑；已写入结果的调用不再被合成 `No result provided` | M1-14 |
+| sandbox-runtime（M1 实测 API） | `SandboxManager` 是全局单例，但 `wrapWithSandbox(cmd, shell, customConfig)` 接受逐条命令的配置，多个 Mission 可共用一次 `initialize` | M1-7 |
+| 安装（M1 实测） | npm 11 解析 vitest 可选 peer 时崩溃（`reading 'edgesOut'`），包内 `.npmrc` 设 `legacy-peer-deps=true` | — |
 
 ---
 
@@ -138,6 +143,10 @@
 | I-7 | 项目层 → 全局层的晋升默认需要用户执行 `/test-promote` 确认（agent-core §17-1 的默认答案） | 全自动闭环只做到项目层，跨项目污染风险由人把关 |
 | I-8 | 崩溃恢复的语义是**副作用至多执行一次**：<br>• 已完成的调用：重放日志里的结果，不重新执行。<br>• 只读或幂等的调用中途中断：可以安全重跑。<br>• 有副作用的调用中途中断：转为 `blocked`，交给人判断。<br>不追求 exactly-once | Mission 有预算上限，环境模板要求每个 Mission 使用独立的测试数据或租户，大部分操作天然幂等。真正需要人工判断的只剩"有副作用且做到一半"这一小类 |
 | I-9 | `missions/runner.ts` 实现 `MissionRunner` 接口（start / resume / abort / status），编排器只依赖接口 | 将来 pi-durable 稳定后，只需替换实现 |
+| I-10 | `test_run` 的副作用类别按契约记为**幂等**（环境模板要求 Mission 独占测试数据或租户）；但依赖安装和范围外主机照常审批，危险命令照常拦截 | 否则每次中断的 `test_run` 都会触发人工确认；需要人判断的只剩 bash/MCP 中做到一半的副作用 |
+| I-11 | 复验结论由代码判定：Verifier 信封的 `verification` 条目引用它**自己的** `test_run`，对照声明所需判决（defect→fail，pass→pass），全部一致为 confirmed，全部相反为 refuted，其余 inconclusive | Verifier 的措辞不参与判定，与"判决只来自 test_run"一致 |
+| I-12 | 自动派发的 Verifier 继承 Executor 的风险等级，不再单独审批 | 目标和操作与已授权的 Executor 相同；避免在后台完成回调中弹审批 |
+| I-13 | 首轮回复前崩溃（会话未落盘）时，用**同一个** mission_id 重跑原 Spec，`resume_count` 加一 | 不产生孤儿 Mission 记录，报告里只出现一次 |
 
 ---
 
@@ -418,6 +427,6 @@ pi-testmode/
 - **未核实项**（实施时第一步确认）：
   - pi-skills 中检索类 Skill 的名称（§2.5）。
   - MCP 工具描述的改写途径（M2-7）。
-  - `fauxProvider` 接入 `ModelRuntime` 的方式（M1-13）。
-  - sandbox-runtime 在 SDK 子会话中的加载方式（M1-7）。
-  - 用 `SessionManager.open()` 重新打开会话后，`createAgentSession({ sessionManager })` 能否直接续跑；以及在 `prompt()` 之前用 `appendMessage()` 写入 toolResult 后，pi-ai 是否不再为该调用合成结果（M1-14）。
+  - ~~`fauxProvider` 接入 `ModelRuntime` 的方式（M1-13）~~：已核实，见 §1。
+  - sandbox-runtime 在 SDK 子会话中的加载方式（M1-7）：API 已核实（§1），以替换 `bash` 工具的内联扩展注入；**未在 macOS/Linux 上实际运行**（开发机为 Windows）。
+  - ~~`SessionManager.open()` 续跑与 `appendMessage()` 写入 toolResult（M1-14）~~：已核实，见 §1 与 `test/e2e/crash.test.ts`。

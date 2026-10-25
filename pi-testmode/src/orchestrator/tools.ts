@@ -1,0 +1,174 @@
+/** Main-session tools in test mode (plan §7). All are registered inactive; test mode activates them. */
+import { StringEnum } from "@earendil-works/pi-ai";
+import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
+import { Value } from "typebox/value";
+import { TEST_KINDS } from "../kernel/scope.ts";
+import type { TestmodePaths } from "../paths.ts";
+import { audit, closeIntent, getIntent, getMission, insertIntent, listMissions } from "../store/repos.ts";
+import { newId, textResult } from "../util.ts";
+import { IntentIRSchema, intentProblems } from "./intent.ts";
+import type { Orchestrator } from "./orchestrator.ts";
+import { buildReport } from "./report.ts";
+
+export interface MainToolHost {
+	orchestrator(): Orchestrator;
+	paths(): TestmodePaths;
+}
+
+export function createIntentRecordTool(host: MainToolHost): ToolDefinition {
+	return defineTool({
+		name: "intent_record",
+		label: "Record Intent",
+		description: "Record the parsed test intent (Intent IR). Returns the intent_id used by mission_dispatch and report_finalize.",
+		promptSnippet: "Record the parsed test intent (Intent IR) and get an intent_id",
+		promptGuidelines: [
+			"Use intent_record once per user test request, before mission_dispatch. Put defaults you chose into assumptions; they appear in the report.",
+		],
+		parameters: IntentIRSchema,
+		executionMode: "sequential",
+		defaultActive: false,
+		async execute(_id, params) {
+			if (!Value.Check(IntentIRSchema, params)) throw new Error("Intent IR does not match the schema");
+			const problems = intentProblems(params);
+			if (problems.length) throw new Error(`Intent not recorded:\n- ${problems.join("\n- ")}`);
+			const o = host.orchestrator();
+			const id = newId("i");
+			o.store.tx(() => {
+				insertIntent(o.store, id, params.raw, params);
+				audit(o.store, { actor: "main", event: "intent_record", reason: `${id}: ${params.goal.kind}` });
+			});
+			return textResult(`intent_id: ${id}`, { intentId: id });
+		},
+	});
+}
+
+const DispatchParams = Type.Object({
+	intent_id: Type.String(),
+	missions: Type.Array(
+		Type.Object({
+			role: StringEnum(["scout", "executor"] as const, {
+				description: "scout = read-only reconnaissance; executor = run tests. Verifiers are dispatched automatically.",
+			}),
+			objective: Type.String({ description: "One concrete objective" }),
+			targets: Type.Array(Type.String(), { description: "Hosts or URLs the mission may touch, e.g. http://localhost:4100" }),
+			test_kinds: Type.Array(StringEnum(TEST_KINDS), { description: "Operations needed: functional, load, security-check, destructive" }),
+			context: Type.Optional(Type.String({ description: "What the mission needs to know: SUT docs, reset endpoint, hypotheses" })),
+			budget: Type.Optional(Type.Object({ tokens: Type.Optional(Type.Number()), wall_clock_s: Type.Optional(Type.Number()) })),
+		}),
+		{ minItems: 1 },
+	),
+});
+
+export function createMissionDispatchTool(host: MainToolHost): ToolDefinition {
+	return defineTool({
+		name: "mission_dispatch",
+		label: "Dispatch Missions",
+		description:
+			"Start one or more missions in the background and return immediately. The kernel computes each mission's risk tier from its targets and operations. Results arrive later as a message; you do not wait or poll.",
+		promptSnippet: "Start missions in the background; results arrive later as a message",
+		promptGuidelines: [
+			"After mission_dispatch, end your turn; do not call mission_status in a loop.",
+			"Use mission_dispatch with role executor to run tests and role scout to learn an unknown SUT first; mission_dispatch adds verifiers automatically.",
+		],
+		parameters: DispatchParams,
+		executionMode: "sequential",
+		defaultActive: false,
+		async execute(_id, params, _signal, _onUpdate, ctx) {
+			const o = host.orchestrator();
+			const outcomes = await o.dispatch(
+				params.intent_id,
+				params.missions.map((m) => ({
+					role: m.role,
+					objective: m.objective,
+					targets: m.targets,
+					testKinds: m.test_kinds,
+					context: m.context,
+					budget: m.budget,
+				})),
+				ctx.model,
+			);
+			const started = outcomes.filter((x) => x.ok);
+			const lines = outcomes.map((x) =>
+				x.ok ? `dispatched ${x.missionId} (${x.role}, ${x.tier})` : `NOT dispatched "${x.objective}": ${x.reason}`,
+			);
+			if (started.length > 0) lines.push("Missions run in the background. End your turn now; you will be woken when results arrive.");
+			return textResult(lines.join("\n"), { outcomes }, { terminate: started.length > 0 });
+		},
+	});
+}
+
+export function createMissionStatusTool(host: MainToolHost): ToolDefinition {
+	return defineTool({
+		name: "mission_status",
+		label: "Mission Status",
+		description: "Summarize missions of an intent (or one mission). Running missions report back on their own.",
+		promptSnippet: "Summarize mission results for an intent",
+		parameters: Type.Object({
+			intent_id: Type.Optional(Type.String()),
+			mission_id: Type.Optional(Type.String()),
+		}),
+		defaultActive: false,
+		async execute(_id, params) {
+			const o = host.orchestrator();
+			const missions = params.mission_id
+				? [getMission(o.store, params.mission_id)].filter((m) => m !== undefined)
+				: params.intent_id
+					? listMissions(o.store, { intentId: params.intent_id })
+					: listMissions(o.store, { statuses: ["queued", "running", "interrupted", "blocked"] });
+			if (missions.length === 0) return textResult("No matching missions.", { missions: [] });
+			const running = missions.filter((m) => m.status === "queued" || m.status === "running");
+			const text = missions.map((m) => o.missionSummary(m)).join("\n");
+			const allRunning = running.length === missions.length;
+			return textResult(
+				allRunning ? `${text}\nStill running; end your turn and wait for the notification.` : text,
+				{ missions: missions.map((m) => ({ id: m.id, status: m.status })) },
+				{ terminate: allRunning },
+			);
+		},
+	});
+}
+
+export function createReportFinalizeTool(host: MainToolHost): ToolDefinition {
+	return defineTool({
+		name: "report_finalize",
+		label: "Finalize Report",
+		description:
+			"Write the intent's report from recorded mission results and close the intent. Verified defects, unconfirmed claims, assumptions, coverage gaps, isolation level, and cost are filled in from the record; you provide the conclusion.",
+		promptSnippet: "Write the report for an intent and close it",
+		promptGuidelines: ["Use report_finalize once the intent's missions have ended; then give the user a short summary and the report path."],
+		parameters: Type.Object({
+			intent_id: Type.String(),
+			conclusion: Type.String({ description: "Answer to the user's question, grounded in confirmed claims only" }),
+			uncovered: Type.Optional(Type.Array(Type.String(), { description: "Targets or goals you chose not to cover" })),
+			notes: Type.Optional(Type.String()),
+			force: Type.Optional(Type.Boolean({ description: "Finalize even though missions are still running" })),
+		}),
+		executionMode: "sequential",
+		defaultActive: false,
+		async execute(_id, params) {
+			const o = host.orchestrator();
+			const intent = getIntent(o.store, params.intent_id);
+			if (!intent) throw new Error(`unknown intent ${params.intent_id}`);
+			const running = listMissions(o.store, { intentId: params.intent_id, statuses: ["queued", "running"] });
+			if (running.length > 0 && !params.force) {
+				throw new Error(`${running.length} mission(s) still running (${running.map((m) => m.id).join(", ")}); end your turn and wait, or pass force: true`);
+			}
+			const r = buildReport(o.store, host.paths(), {
+				intentId: params.intent_id,
+				conclusion: params.conclusion,
+				uncoveredTargets: params.uncovered,
+				notes: params.notes,
+				isolation: o.runner.isolation(),
+			});
+			o.store.tx(() => {
+				closeIntent(o.store, params.intent_id, r.path);
+				audit(o.store, { actor: "main", event: "report_finalize", reason: `${params.intent_id}: ${r.path}` });
+			});
+			return textResult(
+				`Report written: ${r.path}\nconfirmed defects: ${r.confirmedDefects}, confirmed passes: ${r.confirmedPasses}, not confirmed: ${r.unconfirmed}`,
+				{ path: r.path, confirmedDefects: r.confirmedDefects, confirmedPasses: r.confirmedPasses, unconfirmed: r.unconfirmed },
+			);
+		},
+	});
+}
