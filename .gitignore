@@ -6,15 +6,11 @@ dist/
 coverage/
 *.tsbuildinfo
 
-# pi-testmode runtime data (docs/pi-testmode-plan.md §5); scope.json is human-maintained, keep it
-.pi/testmode/*
-!.pi/testmode/scope.json
-
-# SQLite
-*.db
-*.db-wal
-*.db-shm
-*.sqlite
+# Prelude runtime data in this repo (design.md §8); scope.json and project.json are kept
+.prelude/work/
+.prelude/evidence/
+.prelude/runs/
+.prelude/audit.jsonl
 
 # Secrets
 .env

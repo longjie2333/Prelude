@@ -1,7 +1,0 @@
-{
-  "project": "pi-testmode canary",
-  "targets": [{ "host": "localhost:4100", "envs": ["local"], "allowed": ["functional", "load"] }],
-  "limits": { "load": { "max_concurrency": 200, "max_duration": "2m" } },
-  "data": { "policy": "synthetic-only" },
-  "egress_allowlist": []
-}
