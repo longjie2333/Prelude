@@ -52,7 +52,7 @@ const SHELL_TOOLS = new Set(["bash", "powershell"]);
 const WRITE_TOOLS = new Set(["write", "edit"]);
 
 /** Tools of this package, classified by contract (their writes go through controlled DB code). */
-const TESTMODE_TOOLS: Record<string, { effect: EffectClass; tier: RiskTier }> = {
+const TESTMODE_TOOL_EFFECTS: Record<string, { effect: EffectClass; tier: RiskTier }> = {
 	intent_record: { effect: "idempotent", tier: "R0" },
 	questionnaire: { effect: "read_only", tier: "R0" },
 	mission_dispatch: { effect: "idempotent", tier: "R0" },
@@ -275,7 +275,7 @@ export function evaluateToolCall(toolName: string, input: Record<string, unknown
 		return { ...d, action: "allow", effect: "idempotent", reason: "test_run in the mission's test environment" };
 	}
 
-	const own = TESTMODE_TOOLS[toolName];
+	const own = TESTMODE_TOOL_EFFECTS[toolName];
 	if (own) return { action: "allow", ...own, reason: "testmode tool" };
 
 	if (toolName === "tool_search") {
