@@ -1,7 +1,7 @@
 /** /test-kb and /test-why (plan M3-10): read-only views of the knowledge base. */
 import { activeOnly } from "../knowledge/fingerprint.ts";
 import { describePredicate, judge } from "../knowledge/applicability.ts";
-import { getTemplate, listCornerstones, listEpisodes, listTemplates } from "../knowledge/store.ts";
+import { getTemplate, listCornerstones, listEpisodes, listTemplates, templateHistory } from "../knowledge/store.ts";
 import type { Store } from "../store/db.ts";
 import { listDeltas } from "./gate.ts";
 import { aggregate, exceptionSupport, getStats, lowerBound, posteriorMean } from "./stats.ts";
@@ -56,12 +56,8 @@ export function renderWhy(s: Store, templateId: string): string {
 		}`,
 	);
 	lines.push("", "History:");
-	for (let v = 1; v <= t.version; v++) {
-		const r = s.get<{ changelog: string; created_at: string }>(
-			`SELECT changelog, created_at FROM ${t.layer === "global" ? "g" : "main"}.template_versions WHERE template_id = $t AND version = $v`,
-			{ $t: t.id, $v: v },
-		);
-		if (r) lines.push(`  v${v} ${r.created_at.slice(0, 19)} ${r.changelog}`);
+	for (const v of templateHistory(s, t.id, t.version)) {
+		lines.push(`  v${v.version} ${v.createdAt.slice(0, 19)} ${v.changelog}`);
 	}
 	for (const d of listDeltas(s, { target: t.id })) lines.push(`  delta ${d.id} ${d.op}: ${d.status}`);
 	return lines.join("\n");

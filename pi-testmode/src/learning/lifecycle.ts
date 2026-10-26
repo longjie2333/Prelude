@@ -12,6 +12,7 @@ import { edges, getTemplate, listCornerstones, listEpisodes, setTemplateStatus }
 import type { TemplateStatus } from "../knowledge/schema.ts";
 import type { Store } from "../store/db.ts";
 import { audit } from "../store/repos.ts";
+import { positiveTemplateUses } from "./feedback.ts";
 import { listDeltas } from "./gate.ts";
 import { aggregate, clusterKey, getStats, lowerBound, posteriorMean } from "./stats.ts";
 
@@ -22,17 +23,6 @@ export interface Transition {
 	from: TemplateStatus;
 	to: TemplateStatus;
 	reason: string;
-}
-
-function positiveUses(s: Store, templateId: string): Array<{ episodeId: string; intentId: string }> {
-	return s
-		.all<{ episode_id: string; intent_id: string }>(
-			`SELECT u.episode_id, e.intent_id FROM template_uses u JOIN episodes e ON e.id = u.episode_id
-			 JOIN feedback f ON f.episode_id = u.episode_id
-			 WHERE u.template_id = $t AND u.role IN ('applied', 'cited') AND f.triage_class IN ('S', 'V') AND f.credibility >= 0.5`,
-			{ $t: templateId },
-		)
-		.map((r) => ({ episodeId: r.episode_id, intentId: r.intent_id }));
 }
 
 /** How many archived cornerstones the current spec still accepts (the known applicable region). */
@@ -55,7 +45,7 @@ export function nextStatus(s: Store, templateId: string): Transition | undefined
 		?.dst.slice("intent:".length);
 
 	if (t.status === "draft") {
-		const reuse = positiveUses(s, templateId).filter((u) => u.intentId !== origin);
+		const reuse = positiveTemplateUses(s, templateId).filter((u) => u.intentId !== origin);
 		if (reuse.length >= 1)
 			return { from: "draft", to: "candidate", reason: `reused successfully in ${reuse.length} other intent(s)` };
 		return undefined;

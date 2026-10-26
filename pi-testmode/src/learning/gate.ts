@@ -26,6 +26,7 @@ import type { Store } from "../store/db.ts";
 import { audit } from "../store/repos.ts";
 import { newId, nowIso, stableStringify } from "../util.ts";
 import { type Applied, applyDelta, CHANGES_APPLICABILITY, type DeltaOp, OP_KIND, PayloadSchemas } from "./delta.ts";
+import { feedbackEpisodeIds } from "./feedback.ts";
 
 export const THRESHOLDS = { boundary: 2, content: 3, stableExtra: 1 } as const;
 export const MAX_PAYLOAD_BYTES = 4096;
@@ -209,9 +210,8 @@ export function gate(s: Store, p: DeltaProposal, base: TemplateRecord): { report
 	}
 
 	if (p.op === "generalize") {
-		const counter = s
-			.all<{ episode_id: string }>("SELECT episode_id FROM feedback WHERE triage_class IN ('B', 'K')")
-			.map((r) => getEpisode(s, r.episode_id))
+		const counter = feedbackEpisodeIds(s, ["B", "K"])
+			.map((id) => getEpisode(s, id))
 			.filter((ep) => ep?.plan.templates.some((t) => t.id === base.id))
 			.filter(
 				(ep) =>
@@ -253,32 +253,22 @@ export function proposeDelta(s: Store, p: DeltaProposal): { id: string; report: 
 		const { report, applied } = gate(s, proposal, base);
 		const key = p.hypothesisKey ?? hypothesisKey(proposal);
 		const id = p.deltaId ?? newId("d");
-		const row = {
-			$id: id,
-			$op: p.op,
-			$t: target,
-			$v: base.version,
-			$k: key,
-			$p: JSON.stringify(p.payload),
-			$e: JSON.stringify([...new Set(p.evidence)]),
-			$st: report.decision,
-			$g: JSON.stringify(report),
-			$by: p.proposedBy,
-			$ts: nowIso(),
-		};
+		const evidence = [...new Set(p.evidence)];
 		if (p.deltaId) {
-			// node:sqlite rejects named parameters a statement does not use.
-			const { $op: _op, $k: _k, $by: _by, ...update } = row;
-			s.run(
-				`UPDATE deltas SET payload_json = $p, evidence_json = $e, status = $st, gate_report_json = $g, target = $t, target_version = $v, decided_at = $ts WHERE id = $id`,
-				update,
-			);
+			regateDelta(s, id, { target, targetVersion: base.version, payload: p.payload, evidence, report });
 		} else {
-			s.run(
-				`INSERT INTO deltas (id, op, target, target_version, hypothesis_key, payload_json, evidence_json, status, gate_report_json, proposed_by, created_at, decided_at)
-				 VALUES ($id, $op, $t, $v, $k, $p, $e, $st, $g, $by, $ts, $ts)`,
-				row,
-			);
+			insertDelta(s, {
+				id,
+				op: p.op,
+				target,
+				targetVersion: base.version,
+				hypothesisKey: key,
+				payload: p.payload,
+				evidence,
+				status: report.decision,
+				report,
+				proposedBy: p.proposedBy,
+			});
 		}
 		let version: number | undefined;
 		if (report.decision === "committed" && applied) {
@@ -359,4 +349,81 @@ export function listDeltas(
 			report: r.gate_report_json ? JSON.parse(r.gate_report_json) : null,
 			proposedBy: r.proposed_by,
 		}));
+}
+
+/** A delta without a report is a suspended hypothesis (accumulating evidence); with one it has been gated. */
+export function insertDelta(
+	s: Store,
+	d: {
+		id: string;
+		op: DeltaOp;
+		target: string;
+		targetVersion: number | null;
+		hypothesisKey: string;
+		payload: Record<string, unknown>;
+		evidence: string[];
+		status: "pending" | "committed" | "rejected" | "suspended";
+		report: GateReport | null;
+		proposedBy: string;
+	},
+): void {
+	const ts = nowIso();
+	s.run(
+		`INSERT INTO deltas (id, op, target, target_version, hypothesis_key, payload_json, evidence_json, status, gate_report_json, proposed_by, created_at, decided_at)
+		 VALUES ($id, $op, $t, $v, $k, $p, $e, $st, $g, $by, $ts, $decided)`,
+		{
+			$id: d.id,
+			$op: d.op,
+			$t: d.target,
+			$v: d.targetVersion,
+			$k: d.hypothesisKey,
+			$p: JSON.stringify(d.payload),
+			$e: JSON.stringify(d.evidence),
+			$st: d.status,
+			$g: d.report ? JSON.stringify(d.report) : null,
+			$by: d.proposedBy,
+			$ts: ts,
+			$decided: d.report ? ts : null,
+		},
+	);
+}
+
+/** Records a new gate decision for an existing (suspended) delta. */
+export function regateDelta(
+	s: Store,
+	id: string,
+	d: {
+		target: string;
+		targetVersion: number;
+		payload: Record<string, unknown>;
+		evidence: string[];
+		report: GateReport;
+	},
+): void {
+	s.run(
+		`UPDATE deltas SET payload_json = $p, evidence_json = $e, status = $st, gate_report_json = $g, target = $t, target_version = $v, decided_at = $ts WHERE id = $id`,
+		{
+			$id: id,
+			$t: d.target,
+			$v: d.targetVersion,
+			$p: JSON.stringify(d.payload),
+			$e: JSON.stringify(d.evidence),
+			$st: d.report.decision,
+			$g: JSON.stringify(d.report),
+			$ts: nowIso(),
+		},
+	);
+}
+
+export function setDeltaEvidence(s: Store, id: string, evidence: string[]): void {
+	s.run("UPDATE deltas SET evidence_json = $e, decided_at = $ts WHERE id = $id", {
+		$id: id,
+		$e: JSON.stringify(evidence),
+		$ts: nowIso(),
+	});
+}
+
+/** Commits a delta that needs no gate run (a facet.propose whose facet was activated). */
+export function markDeltaCommitted(s: Store, id: string): void {
+	s.run("UPDATE deltas SET status = 'committed', decided_at = $ts WHERE id = $id", { $id: id, $ts: nowIso() });
 }

@@ -4,22 +4,40 @@ import { type Fingerprint, type TemplateSpec, toFingerprint } from "../../src/kn
 import { SEED_TEMPLATES } from "../../src/knowledge/seeds/index.ts";
 import {
 	activateFacet,
+	addTemplateVersion,
 	getTemplate,
 	insertCornerstone,
 	insertEpisode,
 	insertTemplate,
+	insertTemplateUse,
 	proposeFacet,
 	seedKnowledge,
 } from "../../src/knowledge/store.ts";
 import { proposeFacetHypothesis } from "../../src/learning/attributor.ts";
+import { insertCalibrationRun, isLearningPaused, latestCalibration } from "../../src/learning/calibration.ts";
+import {
+	feedbackEpisodeIds,
+	hasFeedback,
+	insertFeedback,
+	isUnresolvedFailure,
+	positiveTemplateUses,
+} from "../../src/learning/feedback.ts";
 import { applyDelta } from "../../src/learning/delta.ts";
 import { garden, similarity } from "../../src/learning/gardener.ts";
-import { ensureProjectOverride, listDeltas, proposeDelta } from "../../src/learning/gate.ts";
+import {
+	ensureProjectOverride,
+	insertDelta,
+	listDeltas,
+	markDeltaCommitted,
+	proposeDelta,
+	setDeltaEvidence,
+} from "../../src/learning/gate.ts";
+import { renderWhy } from "../../src/learning/inspect.ts";
 import { nextStatus } from "../../src/learning/lifecycle.ts";
 import { desensitize } from "../../src/learning/promote.ts";
 import { aggregate, bumpStats, clusterKey, getStats, lowerBound } from "../../src/learning/stats.ts";
 import { contrastSet } from "../../src/learning/triage.ts";
-import { insertIntent, insertMission } from "../../src/store/repos.ts";
+import { insertIntent, insertMission, isIntentLearned, markIntentLearned } from "../../src/store/repos.ts";
 import { type TempProject, tempProject } from "../helpers.ts";
 
 const fp = (o: Record<string, string>): Fingerprint =>
@@ -381,5 +399,71 @@ describe("promotion and gardening", () => {
 		expect(r.duplicates.map((d) => [d.keep, d.deprecate].sort())).toEqual([["tpl://project/a", "tpl://project/b"]]);
 		expect(r.snapshot).toMatch(/snap-.*\.json$/);
 		expect(p.store.get<{ n: number }>("SELECT COUNT(*) AS n FROM snapshots")?.n).toBe(1);
+	});
+});
+
+describe("learning tables", () => {
+	it("feedback: idempotency key, unresolved failures, class filters, credited uses", () => {
+		const ok = episode(fp({ "sut.kind": "rest-api" }));
+		const weak = episode(fp({ "sut.kind": "rest-api" }));
+		const unexplained = episode(fp({ "sut.kind": "rest-api" }));
+		const add = (e: string, triageClass: "S" | "U", credibility: number) =>
+			insertFeedback(p.store, { episodeId: e, signals: {}, credibility, triageClass, attribution: {} });
+		add(ok, "S", 0.9);
+		add(weak, "S", 0.4);
+		add(unexplained, "U", 0.6);
+		for (const e of [ok, weak, unexplained])
+			insertTemplateUse(p.store, { episodeId: e, templateId: "tpl://project/t", version: 1, role: "applied" });
+
+		expect(hasFeedback(p.store, ok)).toBe(true);
+		expect(hasFeedback(p.store, episode(fp({})))).toBe(false);
+		expect([ok, unexplained].map((e) => isUnresolvedFailure(p.store, e))).toEqual([false, true]);
+		expect(feedbackEpisodeIds(p.store, ["U", "K"])).toEqual([unexplained]);
+		// Only credible successes count as reuse.
+		expect(positiveTemplateUses(p.store, "tpl://project/t").map((u) => u.episodeId)).toEqual([ok]);
+		expect(() => add(ok, "S", 1)).toThrow(/UNIQUE/);
+	});
+
+	it("deltas: suspended hypotheses accumulate evidence and commit without a report", () => {
+		const base = {
+			op: "facet.propose" as const,
+			target: "tpl://project/t",
+			hypothesisKey: "facet:t:x",
+			payload: { facet: "x" },
+			proposedBy: "learner",
+		};
+		insertDelta(p.store, {
+			...base,
+			id: "d-1",
+			targetVersion: null,
+			evidence: ["e1"],
+			status: "suspended",
+			report: null,
+		});
+		setDeltaEvidence(p.store, "d-1", ["e1", "e2"]);
+		expect(listDeltas(p.store, { hypothesisKey: "facet:t:x" })).toMatchObject([
+			{ id: "d-1", status: "suspended", evidence: ["e1", "e2"], report: null },
+		]);
+		markDeltaCommitted(p.store, "d-1");
+		expect(listDeltas(p.store, { status: "committed" }).map((d) => d.id)).toEqual(["d-1"]);
+	});
+
+	it("intents are learned once; calibration drift pauses learning", () => {
+		insertIntent(p.store, "i-learn", "r", {});
+		expect(isIntentLearned(p.store, "i-learn")).toBe(false);
+		markIntentLearned(p.store, "i-learn");
+		expect(isIntentLearned(p.store, "i-learn")).toBe(true);
+
+		expect([latestCalibration(p.store), isLearningPaused(p.store)]).toEqual([undefined, false]);
+		insertCalibrationRun(p.store, { id: "cal-1", precision: 0.5, recall: 1, details: {}, drift: true });
+		expect(latestCalibration(p.store)).toEqual({ precision: 0.5, recall: 1, drift: true });
+		expect(isLearningPaused(p.store)).toBe(true);
+	});
+
+	it("/test-why lists every version's changelog in order", () => {
+		const t = insertTemplate(p.store, strategy(), "b", { status: "candidate", changelog: "born" });
+		addTemplateVersion(p.store, t.id, t.spec, "b2", "except ex-1", undefined, 1);
+		const why = renderWhy(p.store, t.id);
+		expect(why).toMatch(/ {2}v1 \S+ born\n {2}v2 \S+ except ex-1/);
 	});
 });

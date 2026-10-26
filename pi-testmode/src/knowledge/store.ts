@@ -196,6 +196,21 @@ export function listTemplates(s: Store, where: { ids?: string[] } = {}): Templat
 	return out;
 }
 
+/** Version changelog of a template, oldest first, up to `upTo` (inclusive). */
+export function templateHistory(
+	s: Store,
+	id: string,
+	upTo: number,
+): Array<{ version: number; changelog: string; createdAt: string }> {
+	return s
+		.all<{ version: number; changelog: string; created_at: string }>(
+			`SELECT version, changelog, created_at FROM ${schemaOf(layerOfId(id))}.template_versions
+			 WHERE template_id = $id AND version <= $v ORDER BY version`,
+			{ $id: id, $v: upTo },
+		)
+		.map((r) => ({ version: r.version, changelog: r.changelog, createdAt: r.created_at }));
+}
+
 /** Template ids whose title/summary/patterns relate to `query` (FTS trigram + short-pattern containment). */
 export function textRecall(s: Store, query: string): Map<string, number> {
 	const hits = new Map<string, number>();

@@ -9,6 +9,7 @@
 import { activeOnly } from "../knowledge/fingerprint.ts";
 import {
 	activateFacet,
+	getEpisode,
 	getEpisodeByMission,
 	getProvider,
 	getTemplate,
@@ -21,11 +22,20 @@ import {
 } from "../knowledge/store.ts";
 import type { Envelope } from "../missions/envelope.ts";
 import type { Store } from "../store/db.ts";
-import { audit, getIntent, listMissions } from "../store/repos.ts";
-import { newId, nowIso } from "../util.ts";
+import { audit, getIntent, isIntentLearned, listMissions, markIntentLearned } from "../store/repos.ts";
+import { newId } from "../util.ts";
 import { type Complete, proposeFacetHypothesis } from "./attributor.ts";
 import { evaluateMission } from "./evaluator.ts";
-import { hypothesisKey, listDeltas, proposeDelta, THRESHOLDS } from "./gate.ts";
+import { hasFeedback, insertFeedback } from "./feedback.ts";
+import {
+	hypothesisKey,
+	insertDelta,
+	listDeltas,
+	markDeltaCommitted,
+	proposeDelta,
+	setDeltaEvidence,
+	THRESHOLDS,
+} from "./gate.ts";
 import { applyLifecycle } from "./lifecycle.ts";
 import { bumpException, bumpStats, clusterKey } from "./stats.ts";
 import { resolveUnexplained, type Triage, triage } from "./triage.ts";
@@ -84,8 +94,7 @@ export class Learner {
 		const result: LearnResult = { intentId, episodes: [], transitions: [] };
 		const intent = getIntent(s, intentId);
 		if (!intent) return { ...result, skipped: "unknown intent" };
-		if (s.get("SELECT 1 FROM intents WHERE id = $i AND learned_at IS NOT NULL", { $i: intentId }))
-			return { ...result, skipped: "already learned" };
+		if (isIntentLearned(s, intentId)) return { ...result, skipped: "already learned" };
 		if (this.deps.paused()) {
 			audit(s, { actor: "main", event: "learning_paused", reason: `${intentId}: calibration drift` });
 			return { ...result, skipped: "paused by calibration drift" };
@@ -95,7 +104,7 @@ export class Learner {
 
 		for (const m of listMissions(s, { intentId }).filter((x) => x.role === "executor")) {
 			const episode = getEpisodeByMission(s, m.id);
-			if (!episode || s.get("SELECT 1 FROM feedback WHERE episode_id = $e", { $e: episode.id })) continue;
+			if (!episode || hasFeedback(s, episode.id)) continue;
 			const evaluation = evaluateMission(s, m.id);
 			if (!evaluation) continue;
 			const uses = listTemplateUses(s, { episodeId: episode.id }).filter(
@@ -111,25 +120,20 @@ export class Learner {
 			const firedException = (m.spec.templates ?? []).find((x) => x.id === strategy?.id)?.exceptionId;
 
 			s.tx(() => {
-				s.run(
-					`INSERT INTO feedback (id, episode_id, signals_json, credibility, triage_class, attribution_json, created_at) VALUES ($id, $e, $sig, $c, $k, $a, $ts)`,
-					{
-						$id: newId("fb"),
-						$e: episode.id,
-						$sig: JSON.stringify(evaluation.signals),
-						$c: evaluation.credibility,
-						$k: t.klass,
-						$a: JSON.stringify({
-							reason: t.reason,
-							contrast: t.contrast,
-							hypothesis: t.hypothesis,
-							unknown: t.unknownFacets,
-							cheating: evaluation.cheating,
-							firstDeviation: t.firstDeviation,
-						}),
-						$ts: nowIso(),
+				insertFeedback(s, {
+					episodeId: episode.id,
+					signals: evaluation.signals,
+					credibility: evaluation.credibility,
+					triageClass: t.klass,
+					attribution: {
+						reason: t.reason,
+						contrast: t.contrast,
+						hypothesis: t.hypothesis,
+						unknown: t.unknownFacets,
+						cheating: evaluation.cheating,
+						firstDeviation: t.firstDeviation,
 					},
-				);
+				});
 				if (evaluation.cheating.length) {
 					// Cheating voids the feedback and counts against the executor's method (meta template).
 					bumpStats(s, "meta:executor", "default", 0, 1);
@@ -193,7 +197,7 @@ export class Learner {
 			const tr = applyLifecycle(s, id);
 			if (tr) result.transitions.push(`${id}: ${tr.from} → ${tr.to}`);
 		}
-		s.run("UPDATE intents SET learned_at = $ts WHERE id = $i", { $i: intentId, $ts: nowIso() });
+		markIntentLearned(s, intentId);
 		audit(s, {
 			actor: "main",
 			event: "learned",
@@ -272,28 +276,22 @@ export class Learner {
 			(d) => d.status === "suspended" || d.status === "pending",
 		);
 		const evidence = [...new Set([...(open?.evidence ?? []), episodeId])];
-		if (open)
-			s.run("UPDATE deltas SET evidence_json = $e, decided_at = $ts WHERE id = $id", {
-				$id: open.id,
-				$e: JSON.stringify(evidence),
-				$ts: nowIso(),
-			});
+		if (open) setDeltaEvidence(s, open.id, evidence);
 		let id = open?.id;
 		if (!open) {
 			id = newId("d");
-			s.run(
-				`INSERT INTO deltas (id, op, target, target_version, hypothesis_key, payload_json, evidence_json, status, proposed_by, created_at)
-				 VALUES ($id, $op, $t, NULL, $k, $p, $e, 'suspended', 'learner', $ts)`,
-				{
-					$id: id,
-					$op: p.op,
-					$t: p.target,
-					$k: key,
-					$p: JSON.stringify(p.payload),
-					$e: JSON.stringify(evidence),
-					$ts: nowIso(),
-				},
-			);
+			insertDelta(s, {
+				id,
+				op: p.op,
+				target: p.target,
+				targetVersion: null,
+				hypothesisKey: key,
+				payload: p.payload,
+				evidence,
+				status: "suspended",
+				report: null,
+				proposedBy: "learner",
+			});
 		}
 		audit(s, {
 			actor: "main",
@@ -310,14 +308,12 @@ export class Learner {
 		env: Envelope | null,
 	): Promise<Triage["hypothesis"] | undefined> {
 		const s = this.deps.store;
-		const ep = s.get<{ fingerprint_json: string }>("SELECT fingerprint_json FROM episodes WHERE id = $e", {
-			$e: episodeId,
-		});
+		const ep = getEpisode(s, episodeId);
 		if (!ep) return undefined;
 		const complete = await this.deps.complete?.();
 		if (!complete) return undefined;
 		const r = await proposeFacetHypothesis(complete, {
-			failure: JSON.parse(ep.fingerprint_json),
+			failure: ep.fingerprint,
 			cornerstones: listCornerstones(s, strategyId)
 				.filter((c) => c.exceptionId === null)
 				.map((c) => c.fingerprint),
@@ -360,10 +356,7 @@ export class Learner {
 				for (const d of listDeltas(s, { status: "suspended" }).filter(
 					(x) => x.op === "facet.propose" && (x.payload as { facet: string }).facet === f.name,
 				)) {
-					s.run("UPDATE deltas SET status = 'committed', decided_at = $ts WHERE id = $id", {
-						$id: d.id,
-						$ts: nowIso(),
-					});
+					markDeltaCommitted(s, d.id);
 				}
 				audit(s, {
 					actor: "main",

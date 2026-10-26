@@ -67,9 +67,7 @@ export function calibrate(
 	const precision = confirmed.length ? (confirmed.length - unmatched.length) / confirmed.length : 1;
 	const recall = active.length ? found.size / active.length : 1;
 
-	const prev = s.get<{ precision: number; recall: number }>(
-		"SELECT precision, recall FROM calibration_runs ORDER BY ts DESC, id DESC LIMIT 1",
-	);
+	const prev = latestCalibration(s);
 	const reasons: string[] = [];
 	if (precision < DRIFT.minPrecision) reasons.push(`precision ${precision.toFixed(2)} < ${DRIFT.minPrecision}`);
 	if (recall < DRIFT.minRecall) reasons.push(`recall ${recall.toFixed(2)} < ${DRIFT.minRecall}`);
@@ -88,17 +86,7 @@ export function calibrate(
 		reasons,
 	};
 	s.tx(() => {
-		s.run(
-			"INSERT INTO calibration_runs (id, ts, precision, recall, details_json, drift) VALUES ($id, $ts, $p, $r, $d, $drift)",
-			{
-				$id: id,
-				$ts: nowIso(),
-				$p: precision,
-				$r: recall,
-				$d: JSON.stringify(details),
-				$drift: drift,
-			},
-		);
+		insertCalibrationRun(s, { id, precision, recall, details, drift });
 		audit(s, {
 			actor: "main",
 			event: "calibration",
@@ -109,10 +97,26 @@ export function calibrate(
 	return { id, precision, recall, drift, details };
 }
 
+export function latestCalibration(s: Store): { precision: number; recall: number; drift: boolean } | undefined {
+	const r = s.get<{ precision: number; recall: number; drift: number }>(
+		"SELECT precision, recall, drift FROM calibration_runs ORDER BY ts DESC, id DESC LIMIT 1",
+	);
+	return r ? { precision: r.precision, recall: r.recall, drift: !!r.drift } : undefined;
+}
+
+export function insertCalibrationRun(
+	s: Store,
+	r: { id: string; precision: number; recall: number; details: unknown; drift: boolean },
+): void {
+	s.run(
+		"INSERT INTO calibration_runs (id, ts, precision, recall, details_json, drift) VALUES ($id, $ts, $p, $r, $d, $drift)",
+		{ $id: r.id, $ts: nowIso(), $p: r.precision, $r: r.recall, $d: JSON.stringify(r.details), $drift: r.drift },
+	);
+}
+
 /** Learning is paused while the latest calibration run shows drift. */
 export function isLearningPaused(s: Store): boolean {
-	const last = s.get<{ drift: number }>("SELECT drift FROM calibration_runs ORDER BY ts DESC, id DESC LIMIT 1");
-	return !!last?.drift;
+	return latestCalibration(s)?.drift ?? false;
 }
 
 /** The verifier's verdicts against truth (J-class check): confirmed claims that match no active bug. */

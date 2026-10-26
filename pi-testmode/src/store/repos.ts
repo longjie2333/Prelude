@@ -60,6 +60,15 @@ export function closeIntent(s: Store, id: string, reportPath: string): void {
 	});
 }
 
+/** Set once the learning pipeline has processed the intent (M3-4 idempotency). */
+export function isIntentLearned(s: Store, id: string): boolean {
+	return !!s.get("SELECT 1 FROM intents WHERE id = $id AND learned_at IS NOT NULL", { $id: id });
+}
+
+export function markIntentLearned(s: Store, id: string): void {
+	s.run("UPDATE intents SET learned_at = $ts WHERE id = $id", { $id: id, $ts: nowIso() });
+}
+
 // ---------------------------------------------------------------- missions
 
 export interface MissionRow {

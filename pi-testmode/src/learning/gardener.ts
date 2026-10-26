@@ -155,6 +155,10 @@ export function garden(s: Store, paths: TestmodePaths, opts: { apply?: boolean }
 	return report;
 }
 
+export function insertSnapshot(s: Store, r: { id: string; ts: string; path: string }): void {
+	s.run("INSERT INTO snapshots (id, ts, path) VALUES ($id, $ts, $p)", { $id: r.id, $ts: r.ts, $p: r.path });
+}
+
 /** Whole-graph snapshot (agent-core §10.9 #6) for rollback and comparison. */
 export function snapshot(s: Store, paths: TestmodePaths): string {
 	const id = newId("snap");
@@ -185,7 +189,7 @@ export function snapshot(s: Store, paths: TestmodePaths): string {
 	};
 	writeFileSync(path, JSON.stringify(data, null, 1));
 	s.tx(() => {
-		s.run("INSERT INTO snapshots (id, ts, path) VALUES ($id, $ts, $p)", { $id: id, $ts: data.ts, $p: path });
+		insertSnapshot(s, { id, ts: data.ts, path });
 		audit(s, { actor: "main", event: "snapshot", reason: path });
 	});
 	return path;

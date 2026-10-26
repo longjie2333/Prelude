@@ -12,6 +12,7 @@ import { getProvider, listCornerstones, listEpisodes, type EpisodeRow } from "..
 import type { Store } from "../store/db.ts";
 import { getMission, listAudit, listTestRuns } from "../store/repos.ts";
 import type { Evaluation } from "./evaluator.ts";
+import { isUnresolvedFailure } from "./feedback.ts";
 
 export type TriageClass = "S" | "V" | "E" | "N" | "J" | "C" | "I" | "P" | "B" | "K" | "U";
 
@@ -181,11 +182,7 @@ export function triage(s: Store, input: TriageInput): Triage {
 	// Earlier unresolved failures of the same strategy (repeated failures where no facet helps → K).
 	const priorFailures = listEpisodes(s, {})
 		.filter((e) => e.id !== episode.id && e.plan.templates.some((t) => t.id === input.strategyId))
-		.filter((e) =>
-			s.get("SELECT 1 FROM feedback WHERE episode_id = $e AND triage_class IN ('K', 'U') AND credibility > 0", {
-				$e: e.id,
-			}),
-		).length;
+		.filter((e) => isUnresolvedFailure(s, e.id)).length;
 	return {
 		...base,
 		klass: "U",
