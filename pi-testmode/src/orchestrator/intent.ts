@@ -2,13 +2,21 @@
 import { StringEnum } from "@earendil-works/pi-ai";
 import { type Static, Type } from "typebox";
 
-export const GOAL_KINDS = ["find_defects", "assess_quality", "regression_guard", "compliance_check", "explore"] as const;
+export const GOAL_KINDS = [
+	"find_defects",
+	"assess_quality",
+	"regression_guard",
+	"compliance_check",
+	"explore",
+] as const;
 
 export const IntentIRSchema = Type.Object({
 	raw: Type.String({ description: "The user's request, verbatim" }),
 	goal: Type.Object({
 		kind: StringEnum(GOAL_KINDS),
-		quality_attributes: Type.Array(Type.String(), { description: "e.g. correctness.consistency, performance.concurrency" }),
+		quality_attributes: Type.Array(Type.String(), {
+			description: "e.g. correctness.consistency, performance.concurrency",
+		}),
 		hypotheses: Type.Array(Type.String(), { description: "Concrete failure hypotheses to test" }),
 	}),
 	sut_refs: Type.Array(
@@ -26,7 +34,9 @@ export const IntentIRSchema = Type.Object({
 		deadline: Type.Optional(Type.String()),
 	}),
 	acceptance: Type.Array(Type.String(), { minItems: 1, description: "What counts as done" }),
-	assumptions: Type.Array(Type.String(), { description: "Gaps you filled with defaults; they are listed in the report" }),
+	assumptions: Type.Array(Type.String(), {
+		description: "Gaps you filled with defaults; they are listed in the report",
+	}),
 	open_questions: Type.Array(Type.String(), { description: "Must be empty: ask with questionnaire first" }),
 });
 
@@ -36,8 +46,11 @@ export type IntentIR = Static<typeof IntentIRSchema>;
 export function intentProblems(ir: IntentIR): string[] {
 	const problems: string[] = [];
 	if (ir.open_questions.length > 0) {
-		problems.push("open_questions is not empty: ask them with questionnaire, then record the answers (or list remaining gaps as assumptions)");
+		problems.push(
+			"open_questions is not empty: ask them with questionnaire, then record the answers (or list remaining gaps as assumptions)",
+		);
 	}
-	if (!ir.constraints.environment.trim()) problems.push("constraints.environment is empty: it changes the risk tier, so ask with questionnaire");
+	if (!ir.constraints.environment.trim())
+		problems.push("constraints.environment is empty: it changes the risk tier, so ask with questionnaire");
 	return problems;
 }

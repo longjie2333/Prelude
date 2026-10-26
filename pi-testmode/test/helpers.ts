@@ -53,7 +53,10 @@ export function policyCtx(p: TempProject, over: Partial<PolicyContext> = {}): Po
 		missionId: "m-1",
 		runDir: join(p.paths.runsDir, "m-1"),
 		missionTier: "R3",
-		scope: { targets: [{ host: "localhost:4100", envs: ["local"], allowed: ["functional", "load"] }], egress_allowlist: ["registry.npmjs.org"] },
+		scope: {
+			targets: [{ host: "localhost:4100", envs: ["local"], allowed: ["functional", "load"] }],
+			egress_allowlist: ["registry.npmjs.org"],
+		},
 		frozen: new Set(),
 		...over,
 	};
@@ -80,7 +83,11 @@ export function debugFile(name: string): string {
 	return join(dir, name);
 }
 
-export async function waitFor<T>(fn: () => T | undefined | false | Promise<T | undefined | false>, timeoutMs = 20_000, intervalMs = 25): Promise<T> {
+export async function waitFor<T>(
+	fn: () => T | undefined | false | Promise<T | undefined | false>,
+	timeoutMs = 20_000,
+	intervalMs = 25,
+): Promise<T> {
 	const start = Date.now();
 	for (;;) {
 		const v = await fn();

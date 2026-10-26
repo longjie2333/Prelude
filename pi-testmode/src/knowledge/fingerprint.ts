@@ -8,7 +8,13 @@ import type { Store } from "../store/db.ts";
 import { type Fingerprint, type FingerprintEntry, toFingerprint } from "./schema.ts";
 import { listEpisodes, listFacets, proposeFacet } from "./store.ts";
 
-const SUT_KIND: Record<string, string> = { api: "rest-api", web: "web-ui", cli: "cli", library: "library", service: "service" };
+const SUT_KIND: Record<string, string> = {
+	api: "rest-api",
+	web: "web-ui",
+	cli: "cli",
+	library: "library",
+	service: "service",
+};
 /** Facets describing the request rather than the SUT; never inherited from earlier episodes. */
 const INTENT_FACETS = new Set(["goal.kind", "quality.attribute", "env.kind", "state.resource_kind"]);
 
@@ -27,7 +33,9 @@ export function fromIntent(ir: Partial<IntentIR>): Fingerprint {
 	const entries: FingerprintEntry[] = [];
 	const push = (facet: string, v: string | string[] | undefined) => {
 		if (v === undefined || (Array.isArray(v) && v.length === 0)) return;
-		entries.push(Array.isArray(v) ? { facet, values: v, conf: 1, src: "intent" } : { facet, value: v, conf: 1, src: "intent" });
+		entries.push(
+			Array.isArray(v) ? { facet, values: v, conf: 1, src: "intent" } : { facet, value: v, conf: 1, src: "intent" },
+		);
 	};
 	push("goal.kind", ir.goal?.kind);
 	push("quality.attribute", ir.goal?.quality_attributes);
@@ -35,7 +43,8 @@ export function fromIntent(ir: Partial<IntentIR>): Fingerprint {
 	const ref = ir.sut_refs?.[0];
 	if (ref) {
 		push("sut.kind", SUT_KIND[ref.kind]);
-		if (/^https?:\/\//i.test(ref.locator) || ref.kind === "api" || ref.kind === "web") push("interface.protocol", ref.kind === "web" ? "http/html" : "http/json");
+		if (/^https?:\/\//i.test(ref.locator) || ref.kind === "api" || ref.kind === "web")
+			push("interface.protocol", ref.kind === "web" ? "http/html" : "http/json");
 	}
 	if (ir.sut_refs?.some((r) => /openapi|swagger/i.test(r.locator))) {
 		push("spec.format", "openapi");
@@ -106,7 +115,9 @@ export function assembleFingerprint(
 				.at(-1)?.fingerprint
 		: undefined;
 	// Intent-scoped facets (goal, quality) come from the intent, not from the SUT's history.
-	const sutOnly = observed ? Object.fromEntries(Object.entries(observed).filter(([k]) => !INTENT_FACETS.has(k))) : undefined;
+	const sutOnly = observed
+		? Object.fromEntries(Object.entries(observed).filter(([k]) => !INTENT_FACETS.has(k)))
+		: undefined;
 	const raw = mergeFingerprints(sutOnly, fromIntent(ir), toFingerprint(explicit));
 	return { fingerprint: activeOnly(s, raw), raw, sutKey };
 }

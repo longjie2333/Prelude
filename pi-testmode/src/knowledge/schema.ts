@@ -6,7 +6,16 @@
 import { StringEnum } from "@earendil-works/pi-ai";
 import { type Static, Type } from "typebox";
 
-export const TEMPLATE_TYPES = ["strategy", "technique", "oracle", "environment", "perception", "capability_recipe", "meta", "pitfall"] as const;
+export const TEMPLATE_TYPES = [
+	"strategy",
+	"technique",
+	"oracle",
+	"environment",
+	"perception",
+	"capability_recipe",
+	"meta",
+	"pitfall",
+] as const;
 export const TEMPLATE_STATUSES = ["draft", "candidate", "stable", "deprecated", "retired"] as const;
 export const PREDICATE_OPS = ["eq", "ne", "in", "not_in", "contains", "exists", "under"] as const;
 export const RISK_TIERS = ["R0", "R1", "R2", "R3", "R4"] as const;
@@ -64,13 +73,19 @@ export const TemplateSpecSchema = Type.Object({
 		oracle: Type.Optional(SlotRef),
 		observation: Type.Optional(Type.Array(Type.String())),
 		environment: Type.Optional(SlotRef),
-		adequacy: Type.Optional(Type.Object({ exploration: Type.Optional(Type.String()), effectiveness: Type.Optional(Type.String()) })),
+		adequacy: Type.Optional(
+			Type.Object({ exploration: Type.Optional(Type.String()), effectiveness: Type.Optional(Type.String()) }),
+		),
 	}),
 	verdict: Type.Object({ fail_when: Type.String(), pass_when: Type.String(), inconclusive_when: Type.String() }),
 	control: Type.Object({ max_repair_iterations: Type.Number(), stop_when: Type.Array(Type.String()) }),
-	parameters: Type.Array(Type.Object({ name: Type.String(), type: Type.String(), default: Type.Optional(Type.String()) })),
+	parameters: Type.Array(
+		Type.Object({ name: Type.String(), type: Type.String(), default: Type.Optional(Type.String()) }),
+	),
 	procedure: Type.Array(Type.Object({ step: Type.Number(), do: Type.String(), expect: Type.String() })),
-	capabilities_required: Type.Array(Type.Object({ cap: Type.String({ pattern: "^cap:[a-z0-9.-]+$" }), constraint: Type.Optional(Type.String()) })),
+	capabilities_required: Type.Array(
+		Type.Object({ cap: Type.String({ pattern: "^cap:[a-z0-9.-]+$" }), constraint: Type.Optional(Type.String()) }),
+	),
 	evidence_contract: Type.Object({
 		required: Type.Array(Type.String()),
 		reproducibility_min: Type.Optional(Type.Number()),

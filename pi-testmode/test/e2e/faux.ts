@@ -16,7 +16,13 @@ export interface ActorInfo {
 
 export interface Ctx {
 	info: ActorInfo;
-	messages: Array<{ role: string; content?: unknown; sections?: Record<string, string | null>; toolCallId?: string; toolName?: string }>;
+	messages: Array<{
+		role: string;
+		content?: unknown;
+		sections?: Record<string, string | null>;
+		toolCallId?: string;
+		toolName?: string;
+	}>;
 	/** Text of the most recent tool result. */
 	lastToolResult(): string;
 	/** All tool results so far, in order. */
@@ -29,7 +35,10 @@ export type Step = (ctx: Ctx) => AssistantMessage;
 
 function textOf(content: unknown): string {
 	if (typeof content === "string") return content;
-	if (Array.isArray(content)) return content.map((c) => (c && typeof c === "object" && "text" in c ? String((c as { text: unknown }).text) : "")).join("\n");
+	if (Array.isArray(content))
+		return content
+			.map((c) => (c && typeof c === "object" && "text" in c ? String((c as { text: unknown }).text) : ""))
+			.join("\n");
 	return "";
 }
 
@@ -52,7 +61,8 @@ export function systemText(messages: Ctx["messages"]): string {
 }
 
 export function identify(messages: Ctx["messages"]): ActorInfo {
-	if (messages.some((m) => m.role === "system" && textOf(m.content).includes("<attributor>"))) return { actor: "attributor" };
+	if (messages.some((m) => m.role === "system" && textOf(m.content).includes("<attributor>")))
+		return { actor: "attributor" };
 	const sections = sectionsOf(messages);
 	if (sections.mission) {
 		const get = (key: string) => sections.mission.match(new RegExp(`^${key}: (.+?)(?:\\s+#.*)?$`, "m"))?.[1]?.trim();
@@ -75,7 +85,12 @@ export function makeCtx(messages: Ctx["messages"]): Ctx {
 		toolResults() {
 			return messages
 				.filter((x) => x.role === "toolResult")
-				.map((x) => ({ toolName: x.toolName ?? "", toolCallId: x.toolCallId ?? "", text: textOf(x.content), isError: (x as { isError?: boolean }).isError }));
+				.map((x) => ({
+					toolName: x.toolName ?? "",
+					toolCallId: x.toolCallId ?? "",
+					text: textOf(x.content),
+					isError: (x as { isError?: boolean }).isError,
+				}));
 		},
 		lastUserText() {
 			const m = [...messages].reverse().find((x) => x.role === "user" || x.role === "custom");
@@ -99,7 +114,12 @@ export function createRouter(tmpDir: string, scripts: Record<string, Step[]>): R
 	const seen: Router["seen"] = [];
 	const route = (context: { messages: unknown[] }): AssistantMessage => {
 		const ctx = makeCtx(context.messages as Ctx["messages"]);
-		seen.push({ info: ctx.info, lastUserText: ctx.lastUserText(), system: systemText(ctx.messages), raw: JSON.stringify(context.messages) });
+		seen.push({
+			info: ctx.info,
+			lastUserText: ctx.lastUserText(),
+			system: systemText(ctx.messages),
+			raw: JSON.stringify(context.messages),
+		});
 		const queue = scripts[ctx.info.actor];
 		const step = queue?.shift();
 		if (!step) return fauxAssistantMessage(fauxText(`[faux] no script left for ${ctx.info.actor}`));
@@ -109,7 +129,11 @@ export function createRouter(tmpDir: string, scripts: Record<string, Step[]>): R
 	let runtime: Promise<ModelRuntime> | undefined;
 	return {
 		runtime: () =>
-			(runtime ??= ModelRuntime.create({ authPath: join(tmpDir, "auth.json"), modelsPath: null, refreshOnCreate: false }).then((r) => {
+			(runtime ??= ModelRuntime.create({
+				authPath: join(tmpDir, "auth.json"),
+				modelsPath: null,
+				refreshOnCreate: false,
+			}).then((r) => {
 				r.registerNativeProvider(faux.provider);
 				return r;
 			})),

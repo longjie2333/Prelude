@@ -69,9 +69,18 @@ export function ensureProjectOverride(s: Store, target: string): string {
 	if (!t) throw new Error(`unknown template ${target}`);
 	const id = `tpl://project/${target.slice("tpl://global/".length)}`;
 	s.tx(() => {
-		insertTemplate(s, { ...t.spec, id }, t.body, { status: t.status, changelog: `project override of ${target}@${t.version}` });
+		insertTemplate(s, { ...t.spec, id }, t.body, {
+			status: t.status,
+			changelog: `project override of ${target}@${t.version}`,
+		});
 		addEdge(s, "project", id, target, "overrides");
-		for (const c of listCornerstones(s, target)) insertCornerstone(s, { templateId: id, exceptionId: c.exceptionId, episodeId: c.episodeId, fingerprint: c.fingerprint });
+		for (const c of listCornerstones(s, target))
+			insertCornerstone(s, {
+				templateId: id,
+				exceptionId: c.exceptionId,
+				episodeId: c.episodeId,
+				fingerprint: c.fingerprint,
+			});
 	});
 	return id;
 }
@@ -81,7 +90,11 @@ function graphOk(s: Store, spec: TemplateSpec, extra: Applied["edges"] = []): st
 		const out = new Map<string, string[]>();
 		for (const e of edges(s, { kind })) out.set(e.src, [...(out.get(e.src) ?? []), e.dst]);
 		for (const e of extra.filter((x) => x.kind === kind)) out.set(e.src, [...(out.get(e.src) ?? []), e.dst]);
-		if (kind === "composes") out.set(spec.id, (spec.composes ?? []).map((c) => c.ref));
+		if (kind === "composes")
+			out.set(
+				spec.id,
+				(spec.composes ?? []).map((c) => c.ref),
+			);
 		if (kind === "specializes" && spec.specializes) out.set(spec.id, [spec.specializes]);
 		const seen = new Set<string>();
 		const stack = new Set<string>();
@@ -102,7 +115,10 @@ function graphOk(s: Store, spec: TemplateSpec, extra: Applied["edges"] = []): st
 function refsOk(s: Store, spec: TemplateSpec): string | undefined {
 	const refs = [
 		...(spec.composes ?? []).map((c) => c.ref),
-		...spec.applicability.exceptions.flatMap((e) => [e.redirect, e.patch?.use?.startsWith("tpl://") ? e.patch.use : undefined]),
+		...spec.applicability.exceptions.flatMap((e) => [
+			e.redirect,
+			e.patch?.use?.startsWith("tpl://") ? e.patch.use : undefined,
+		]),
 	].filter((r): r is string => !!r);
 	const missing = refs.filter((r) => !getTemplate(s, r));
 	return missing.length ? `unresolved references: ${missing.join(", ")}` : undefined;
@@ -111,13 +127,29 @@ function refsOk(s: Store, spec: TemplateSpec): string | undefined {
 export function gate(s: Store, p: DeltaProposal, base: TemplateRecord): { report: GateReport; applied?: Applied } {
 	const checks: GateReport["checks"] = [];
 	const check = (name: string, ok: boolean, detail = "") => checks.push({ name, ok, detail });
-	const report: GateReport = { op: p.op, target: base.id, baseVersion: base.version, checks, replay: [], evidence: { have: 0, need: 0 }, decision: "rejected" };
+	const report: GateReport = {
+		op: p.op,
+		target: base.id,
+		baseVersion: base.version,
+		checks,
+		replay: [],
+		evidence: { have: 0, need: 0 },
+		decision: "rejected",
+	};
 
 	const payloadOk = Value.Check(PayloadSchemas[p.op], p.payload);
-	check("payload schema", payloadOk, payloadOk ? "" : `${[...Value.Errors(PayloadSchemas[p.op], p.payload)][0]?.message ?? "invalid"}`);
+	check(
+		"payload schema",
+		payloadOk,
+		payloadOk ? "" : `${[...Value.Errors(PayloadSchemas[p.op], p.payload)][0]?.message ?? "invalid"}`,
+	);
 	const size = Buffer.byteLength(stableStringify(p.payload));
 	check("size limit", size <= MAX_PAYLOAD_BYTES, `${size} bytes`);
-	check("no severity boost", !("severity" in p.payload) && !("priority" in p.payload), "severity/priority fields are not accepted");
+	check(
+		"no severity boost",
+		!("severity" in p.payload) && !("priority" in p.payload),
+		"severity/priority fields are not accepted",
+	);
 	if (!checks.every((c) => c.ok)) return { report };
 
 	let applied: Applied;
@@ -128,7 +160,11 @@ export function gate(s: Store, p: DeltaProposal, base: TemplateRecord): { report
 		return { report };
 	}
 	const schemaOk = Value.Check(TemplateSpecSchema, applied.spec);
-	check("template schema", schemaOk, schemaOk ? "" : `${[...Value.Errors(TemplateSpecSchema, applied.spec)][0]?.instancePath ?? ""}`);
+	check(
+		"template schema",
+		schemaOk,
+		schemaOk ? "" : `${[...Value.Errors(TemplateSpecSchema, applied.spec)][0]?.instancePath ?? ""}`,
+	);
 	const refs = refsOk(s, applied.spec);
 	check("references resolve", !refs, refs ?? "");
 	const cyc = graphOk(s, applied.spec, applied.edges);
@@ -140,7 +176,8 @@ export function gate(s: Store, p: DeltaProposal, base: TemplateRecord): { report
 			const fp = activeOnly(s, c.fingerprint);
 			const before = judge(base.spec.applicability, fp);
 			const after = judge(applied.spec.applicability, fp);
-			const same = before.result === after.result && (before.exception?.id ?? null) === (after.exception?.id ?? null);
+			const same =
+				before.result === after.result && (before.exception?.id ?? null) === (after.exception?.id ?? null);
 			report.replay.push({
 				episodeId: c.episodeId,
 				exceptionId: c.exceptionId,
@@ -150,7 +187,11 @@ export function gate(s: Store, p: DeltaProposal, base: TemplateRecord): { report
 			});
 		}
 		const changed = report.replay.filter((r) => !r.ok);
-		check("cornerstone replay", changed.length === 0, changed.length ? `${changed.length} cornerstone verdict(s) would change` : `${report.replay.length} unchanged`);
+		check(
+			"cornerstone replay",
+			changed.length === 0,
+			changed.length ? `${changed.length} cornerstone verdict(s) would change` : `${report.replay.length} unchanged`,
+		);
 	}
 
 	// The new exception must actually fire on the episodes it is built from (first-match order).
@@ -160,7 +201,11 @@ export function gate(s: Store, p: DeltaProposal, base: TemplateRecord): { report
 			const ep = getEpisode(s, id);
 			return !ep || judge(applied.spec.applicability, activeOnly(s, ep.fingerprint)).exception?.id !== exId;
 		});
-		check("exception fires on its evidence", misses.length === 0, misses.length ? `does not fire on ${misses.join(", ")}` : "");
+		check(
+			"exception fires on its evidence",
+			misses.length === 0,
+			misses.length ? `does not fire on ${misses.join(", ")}` : "",
+		);
 	}
 
 	if (p.op === "generalize") {
@@ -168,8 +213,17 @@ export function gate(s: Store, p: DeltaProposal, base: TemplateRecord): { report
 			.all<{ episode_id: string }>("SELECT episode_id FROM feedback WHERE triage_class IN ('B', 'K')")
 			.map((r) => getEpisode(s, r.episode_id))
 			.filter((ep) => ep?.plan.templates.some((t) => t.id === base.id))
-			.filter((ep) => ep && judge(applied.spec.applicability, activeOnly(s, ep.fingerprint)).result === "true" && judge(base.spec.applicability, activeOnly(s, ep.fingerprint)).result !== "true");
-		check("counter-example search", counter.length === 0, counter.length ? `${counter.length} failing episode(s) fall in the widened region` : "");
+			.filter(
+				(ep) =>
+					ep &&
+					judge(applied.spec.applicability, activeOnly(s, ep.fingerprint)).result === "true" &&
+					judge(base.spec.applicability, activeOnly(s, ep.fingerprint)).result !== "true",
+			);
+		check(
+			"counter-example search",
+			counter.length === 0,
+			counter.length ? `${counter.length} failing episode(s) fall in the widened region` : "",
+		);
 	}
 
 	if (!checks.every((c) => c.ok)) return { report, applied };
@@ -183,7 +237,8 @@ export function gate(s: Store, p: DeltaProposal, base: TemplateRecord): { report
 }
 
 export function hypothesisKey(p: Pick<DeltaProposal, "op" | "target" | "payload">): string {
-	if (p.op === "except") return `except:${p.target}:${stableStringify((p.payload as { exception: { when: unknown } }).exception.when)}`;
+	if (p.op === "except")
+		return `except:${p.target}:${stableStringify((p.payload as { exception: { when: unknown } }).exception.when)}`;
 	if (p.op === "facet.propose") return `facet:${p.target}:${(p.payload as { facet: string }).facet}`;
 	return `${p.op}:${p.target}:${stableStringify(p.payload)}`;
 }
@@ -228,13 +283,27 @@ export function proposeDelta(s: Store, p: DeltaProposal): { id: string; report: 
 		let version: number | undefined;
 		if (report.decision === "committed" && applied) {
 			if (p.op !== "reinforce" && p.op !== "rebind" && p.op !== "facet.propose") {
-				version = addTemplateVersion(s, target, applied.spec, applied.body ?? base.body, `${p.op} (${id})`, id, base.version);
+				version = addTemplateVersion(
+					s,
+					target,
+					applied.spec,
+					applied.body ?? base.body,
+					`${p.op} (${id})`,
+					id,
+					base.version,
+				);
 			}
 			if (p.op === "except") {
 				const exId = (p.payload as { exception: { id: string } }).exception.id;
 				for (const epId of p.evidence) {
 					const ep = getEpisode(s, epId);
-					if (ep) insertCornerstone(s, { templateId: target, exceptionId: exId, episodeId: epId, fingerprint: ep.fingerprint });
+					if (ep)
+						insertCornerstone(s, {
+							templateId: target,
+							exceptionId: exId,
+							episodeId: epId,
+							fingerprint: ep.fingerprint,
+						});
 				}
 			}
 			for (const e of applied.edges ?? []) addEdge(s, "project", e.src, e.dst, e.kind);
@@ -244,13 +313,21 @@ export function proposeDelta(s: Store, p: DeltaProposal): { id: string; report: 
 			actor: (p.proposedBy.startsWith("mission:") ? p.proposedBy : "main") as `mission:${string}` | "main",
 			event: "delta",
 			decision: report.decision,
-			reason: `${id} ${p.op} ${target}@${base.version}: ${report.checks.filter((c) => !c.ok).map((c) => `${c.name} — ${c.detail}`).join("; ") || `evidence ${report.evidence.have}/${report.evidence.need}`}`,
+			reason: `${id} ${p.op} ${target}@${base.version}: ${
+				report.checks
+					.filter((c) => !c.ok)
+					.map((c) => `${c.name} — ${c.detail}`)
+					.join("; ") || `evidence ${report.evidence.have}/${report.evidence.need}`
+			}`,
 		});
 		return { id, report, version };
 	});
 }
 
-export function listDeltas(s: Store, where: { target?: string; status?: string; hypothesisKey?: string } = {}): Array<{
+export function listDeltas(
+	s: Store,
+	where: { target?: string; status?: string; hypothesisKey?: string } = {},
+): Array<{
 	id: string;
 	op: DeltaOp;
 	target: string;
@@ -263,18 +340,23 @@ export function listDeltas(s: Store, where: { target?: string; status?: string; 
 }> {
 	const clauses: string[] = [];
 	const params: Record<string, string> = {};
-	if (where.target) (clauses.push("target = $t"), (params.$t = where.target));
-	if (where.status) (clauses.push("status = $s"), (params.$s = where.status));
-	if (where.hypothesisKey) (clauses.push("hypothesis_key = $k"), (params.$k = where.hypothesisKey));
-	return s.all<Record<string, string>>(`SELECT * FROM deltas ${clauses.length ? `WHERE ${clauses.join(" AND ")}` : ""} ORDER BY created_at, id`, params).map((r) => ({
-		id: r.id,
-		op: r.op as DeltaOp,
-		target: r.target,
-		hypothesisKey: r.hypothesis_key ?? null,
-		payload: JSON.parse(r.payload_json),
-		evidence: JSON.parse(r.evidence_json),
-		status: r.status,
-		report: r.gate_report_json ? JSON.parse(r.gate_report_json) : null,
-		proposedBy: r.proposed_by,
-	}));
+	if (where.target) clauses.push("target = $t"), (params.$t = where.target);
+	if (where.status) clauses.push("status = $s"), (params.$s = where.status);
+	if (where.hypothesisKey) clauses.push("hypothesis_key = $k"), (params.$k = where.hypothesisKey);
+	return s
+		.all<Record<string, string>>(
+			`SELECT * FROM deltas ${clauses.length ? `WHERE ${clauses.join(" AND ")}` : ""} ORDER BY created_at, id`,
+			params,
+		)
+		.map((r) => ({
+			id: r.id,
+			op: r.op as DeltaOp,
+			target: r.target,
+			hypothesisKey: r.hypothesis_key ?? null,
+			payload: JSON.parse(r.payload_json),
+			evidence: JSON.parse(r.evidence_json),
+			status: r.status,
+			report: r.gate_report_json ? JSON.parse(r.gate_report_json) : null,
+			proposedBy: r.proposed_by,
+		}));
 }

@@ -57,7 +57,12 @@ export function findOrphanCalls(sm: SessionManager): Array<{ toolCallId: string;
 	return calls.filter((c) => !answered.has(c.id)).map((c) => ({ toolCallId: c.id, toolName: c.name }));
 }
 
-export function resolveOrphans(sm: SessionManager, store: Store, missionId: string, evidenceDir: string): OrphanResolution[] {
+export function resolveOrphans(
+	sm: SessionManager,
+	store: Store,
+	missionId: string,
+	evidenceDir: string,
+): OrphanResolution[] {
 	return findOrphanCalls(sm).map(({ toolCallId, toolName }) => {
 		const journal = getJournal(store, missionId, toolCallId);
 		const call: OrphanCall = { toolCallId, toolName, journal };
@@ -65,16 +70,22 @@ export function resolveOrphans(sm: SessionManager, store: Store, missionId: stri
 		if (journal.status === "finished" && journal.resultRef) {
 			const raw = readEvidence(evidenceDir, journal.resultRef);
 			if (raw) {
-				const parsed = JSON.parse(raw.toString("utf8")) as { content: unknown[]; details: unknown; isError: boolean };
+				const parsed = JSON.parse(raw.toString("utf8")) as {
+					content: unknown[];
+					details: unknown;
+					isError: boolean;
+				};
 				return { kind: "replay", call, result: parsed };
 			}
 		}
-		if (journal.effectClass === "read_only" || journal.effectClass === "idempotent") return { kind: "rerun_safe", call };
+		if (journal.effectClass === "read_only" || journal.effectClass === "idempotent")
+			return { kind: "rerun_safe", call };
 		return { kind: "unknown_side_effect", call };
 	});
 }
 
-const RERUN_TEXT = "[testmode recovery] This call was interrupted by a crash before it finished. It is read-only or idempotent, so it is safe to re-run if you still need the result.";
+const RERUN_TEXT =
+	"[testmode recovery] This call was interrupted by a crash before it finished. It is read-only or idempotent, so it is safe to re-run if you still need the result.";
 const UNKNOWN_TEXT =
 	"[testmode recovery] This call was interrupted mid-execution and has side effects; its outcome is UNKNOWN. A human approved continuing. Reset the environment (or verify its state) before relying on anything this call may have changed. Do not assume it succeeded or failed.";
 
@@ -82,7 +93,12 @@ const UNKNOWN_TEXT =
 export function applyResolutions(sm: SessionManager, resolutions: readonly OrphanResolution[]): void {
 	for (const r of resolutions) {
 		if (r.kind === "untracked") continue;
-		const base = { role: "toolResult" as const, toolCallId: r.call.toolCallId, toolName: r.call.toolName, timestamp: Date.now() };
+		const base = {
+			role: "toolResult" as const,
+			toolCallId: r.call.toolCallId,
+			toolName: r.call.toolName,
+			timestamp: Date.now(),
+		};
 		if (r.kind === "replay") {
 			sm.appendMessage({
 				...base,
@@ -105,10 +121,19 @@ export function recoveryNote(resolutions: readonly OrphanResolution[], voidedTes
 	const rerun = resolutions.filter((r) => r.kind === "rerun_safe").map((r) => r.call.toolName);
 	const unknown = resolutions.filter((r) => r.kind === "unknown_side_effect").map((r) => r.call.toolName);
 	const lines = [`[testmode recovery] This mission was interrupted (${reason}) and has been resumed.`];
-	if (replayed.length) lines.push(`- Completed before the interruption (results restored, not re-executed): ${replayed.join(", ")}`);
+	if (replayed.length)
+		lines.push(`- Completed before the interruption (results restored, not re-executed): ${replayed.join(", ")}`);
 	if (rerun.length) lines.push(`- Interrupted, safe to re-run: ${rerun.join(", ")}`);
-	if (unknown.length) lines.push(`- Interrupted with UNKNOWN side effects (reset or verify the environment first): ${unknown.join(", ")}`);
-	if (voidedTestRuns) lines.push(`- ${voidedTestRuns} test_run(s) in flight were voided (verdict inconclusive); run them again if needed.`);
-	lines.push("Continue the mission from where it stopped and finish with mission_submit. Do not repeat completed side effects.");
+	if (unknown.length)
+		lines.push(
+			`- Interrupted with UNKNOWN side effects (reset or verify the environment first): ${unknown.join(", ")}`,
+		);
+	if (voidedTestRuns)
+		lines.push(
+			`- ${voidedTestRuns} test_run(s) in flight were voided (verdict inconclusive); run them again if needed.`,
+		);
+	lines.push(
+		"Continue the mission from where it stopped and finish with mission_submit. Do not repeat completed side effects.",
+	);
 	return lines.join("\n");
 }

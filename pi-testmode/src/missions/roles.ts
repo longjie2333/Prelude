@@ -30,7 +30,10 @@ export function parseRoleFile(text: string): RoleDefinition {
 	return {
 		name: fields.name as Role,
 		description: fields.description ?? "",
-		tools: fields.tools.split(",").map((t) => t.trim()).filter(Boolean),
+		tools: fields.tools
+			.split(",")
+			.map((t) => t.trim())
+			.filter(Boolean),
 		model: fields.model || undefined,
 		systemPrompt: m[2].trim(),
 	};
@@ -73,9 +76,17 @@ export function renderMissionSpec(spec: MissionSpecRecord, runDir: string): stri
 		`run_dir: ${runDir}  # the only directory you may write`,
 		"return: mission_submit (result envelope)",
 	];
-	if (spec.context) lines.push(`context: |\n${spec.context.split("\n").map((l) => `  ${l}`).join("\n")}`);
+	if (spec.context)
+		lines.push(
+			`context: |\n${spec.context
+				.split("\n")
+				.map((l) => `  ${l}`)
+				.join("\n")}`,
+		);
 	if (spec.probes?.length) {
-		lines.push(`probe: observe and report ${spec.probes.join(", ")} in mission_submit.fingerprint (with conf and src); an earlier result suggests it decides whether the template applies`);
+		lines.push(
+			`probe: observe and report ${spec.probes.join(", ")} in mission_submit.fingerprint (with conf and src); an earlier result suggests it decides whether the template applies`,
+		);
 	}
 	if (spec.verify) {
 		const v = spec.verify;

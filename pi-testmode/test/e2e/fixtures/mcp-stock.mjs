@@ -31,7 +31,11 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
 	const ok = (result) => send({ jsonrpc: "2.0", id: req.id, result });
 	switch (req.method) {
 		case "initialize":
-			return ok({ protocolVersion: req.params?.protocolVersion ?? "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "stock", version: "1.0.0" } });
+			return ok({
+				protocolVersion: req.params?.protocolVersion ?? "2025-06-18",
+				capabilities: { tools: {} },
+				serverInfo: { name: "stock", version: "1.0.0" },
+			});
 		case "tools/list":
 			return ok({ tools });
 		case "tools/call": {

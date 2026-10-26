@@ -21,7 +21,10 @@ export interface CommandAnalysis {
 
 const DANGEROUS: Array<[RegExp, string]> = [
 	[/\bsudo\b|\bdoas\b|\brunas\b/i, "privilege escalation"],
-	[/\brm\s+(-[a-z]*\s+)*-[a-z]*r[a-z]*\s+(-[a-z]+\s+)*(\/|~|\$HOME|\*|\.\.?)(\s|$|\/\s|\/\*)/i, "recursive delete of a root, home, or parent directory"],
+	[
+		/\brm\s+(-[a-z]*\s+)*-[a-z]*r[a-z]*\s+(-[a-z]+\s+)*(\/|~|\$HOME|\*|\.\.?)(\s|$|\/\s|\/\*)/i,
+		"recursive delete of a root, home, or parent directory",
+	],
 	[/\bRemove-Item\b[^|;]*-Recurse[^|;]*\s([a-z]:\\?|~|\\|\/)(\s|$)/i, "recursive delete of a drive or home"],
 	[/\b(mkfs(\.\w+)?|fdisk|diskpart|format\s+[a-z]:)\b/i, "disk formatting"],
 	[/\bdd\b[^|;]*\bof=\/dev\//i, "raw device write"],
@@ -31,10 +34,16 @@ const DANGEROUS: Array<[RegExp, string]> = [
 	[/\bgit\s+push\b/i, "git push leaves the sandbox"],
 	[/\bgit\s+(reset\s+--hard|clean\s+-[a-z]*f)/i, "destroys working tree changes"],
 	[/\b(curl|wget)\b[^|]*\|\s*(ba|z|da)?sh\b/i, "pipes a download into a shell"],
-	[/\b(iwr|irm|Invoke-WebRequest|Invoke-RestMethod)\b[^|]*\|\s*(iex|Invoke-Expression)\b/i, "pipes a download into PowerShell"],
+	[
+		/\b(iwr|irm|Invoke-WebRequest|Invoke-RestMethod)\b[^|]*\|\s*(iex|Invoke-Expression)\b/i,
+		"pipes a download into PowerShell",
+	],
 	[/\breg\s+delete\b/i, "registry delete"],
 	// Whole-filesystem scans: never needed for a mission and they hang for many minutes (real-model smoke runs).
-	[/\b(find|du|ls|grep|rg|tree)\s+(-\S+\s+)*(?:(?!-)[^\s/~$]\S*\s+)?(["']?)(\/|[a-z]:(?:\\|\/)?|~|\$HOME|\/c|\/mnt\/[a-z])\3(?=\s|$)/i, "scans a whole filesystem or home directory"],
+	[
+		/\b(find|du|ls|grep|rg|tree)\s+(-\S+\s+)*(?:(?!-)[^\s/~$]\S*\s+)?(["']?)(\/|[a-z]:(?:\\|\/)?|~|\$HOME|\/c|\/mnt\/[a-z])\3(?=\s|$)/i,
+		"scans a whole filesystem or home directory",
+	],
 	[/\bGet-ChildItem\b[^|;]*-Recurse[^|;]*\s(["']?)([a-z]:\\?|~|\\)\1(\s|$)/i, "scans a whole drive or home directory"],
 ];
 
@@ -56,11 +65,62 @@ const INSTALLS: RegExp[] = [
 ];
 
 const READ_ONLY_COMMANDS = new Set([
-	"ls", "dir", "cat", "head", "tail", "wc", "grep", "egrep", "rg", "find", "pwd", "echo", "printf", "which", "where",
-	"type", "file", "stat", "du", "df", "env", "printenv", "date", "uname", "whoami", "hostname", "jq", "sort", "uniq",
-	"cut", "tr", "awk", "xxd", "od", "sha256sum", "md5sum", "basename", "dirname", "realpath", "true", "test", "diff",
-	"get-childitem", "get-content", "select-string", "get-item", "test-path", "get-location", "resolve-path",
-	"get-filehash", "measure-object", "select-object", "where-object", "sort-object", "format-list", "format-table",
+	"ls",
+	"dir",
+	"cat",
+	"head",
+	"tail",
+	"wc",
+	"grep",
+	"egrep",
+	"rg",
+	"find",
+	"pwd",
+	"echo",
+	"printf",
+	"which",
+	"where",
+	"type",
+	"file",
+	"stat",
+	"du",
+	"df",
+	"env",
+	"printenv",
+	"date",
+	"uname",
+	"whoami",
+	"hostname",
+	"jq",
+	"sort",
+	"uniq",
+	"cut",
+	"tr",
+	"awk",
+	"xxd",
+	"od",
+	"sha256sum",
+	"md5sum",
+	"basename",
+	"dirname",
+	"realpath",
+	"true",
+	"test",
+	"diff",
+	"get-childitem",
+	"get-content",
+	"select-string",
+	"get-item",
+	"test-path",
+	"get-location",
+	"resolve-path",
+	"get-filehash",
+	"measure-object",
+	"select-object",
+	"where-object",
+	"sort-object",
+	"format-list",
+	"format-table",
 ]);
 
 const READ_ONLY_SUBCOMMANDS: Record<string, RegExp> = {
@@ -136,10 +196,16 @@ function extractWriteTargets(raw: string): string[] {
 	const cmd = unquoted(raw);
 	const targets: string[] = [];
 	// Not part of `2>&1`, `=>`, `->`, `>=`, or `-gt`-style arithmetic.
-	for (const m of cmd.matchAll(/(?<![0-9&=\-<>])>>?(?![=&>])\s*(?:"([^"]+)"|'([^']+)'|([^\s;&|"'<>()]+))/g)) targets.push(m[1] ?? m[2] ?? m[3]);
+	for (const m of cmd.matchAll(/(?<![0-9&=\-<>])>>?(?![=&>])\s*(?:"([^"]+)"|'([^']+)'|([^\s;&|"'<>()]+))/g))
+		targets.push(m[1] ?? m[2] ?? m[3]);
 	for (const m of raw.matchAll(/\btee\s+(?:-a\s+)?(["']?)([^\s;&|"']+)\1/g)) targets.push(m[2]);
-	for (const m of raw.matchAll(/\b(Out-File|Set-Content|Add-Content)\b[^|;]*?(?:-(?:File)?Path\s+)?(["']?)([^\s;|"'-][^\s;|"']*)\2/gi)) targets.push(m[3]);
-	return targets.filter((t) => !/^\/dev\/(null|stdout|stderr)$/i.test(t) && t.toLowerCase() !== "nul" && t !== "$null");
+	for (const m of raw.matchAll(
+		/\b(Out-File|Set-Content|Add-Content)\b[^|;]*?(?:-(?:File)?Path\s+)?(["']?)([^\s;|"'-][^\s;|"']*)\2/gi,
+	))
+		targets.push(m[3]);
+	return targets.filter(
+		(t) => !/^\/dev\/(null|stdout|stderr)$/i.test(t) && t.toLowerCase() !== "nul" && t !== "$null",
+	);
 }
 
 export function analyzeCommand(cmd: string): CommandAnalysis {

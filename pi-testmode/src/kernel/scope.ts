@@ -30,7 +30,9 @@ export const ScopeSchema = Type.Object({
 					windows: Type.Optional(Type.Array(Type.String())),
 				}),
 			),
-			security_check: Type.Optional(Type.Object({ ruleset: Type.Optional(Type.String()), intrusive: Type.Optional(Type.Boolean()) })),
+			security_check: Type.Optional(
+				Type.Object({ ruleset: Type.Optional(Type.String()), intrusive: Type.Optional(Type.Boolean()) }),
+			),
 		}),
 	),
 	data: Type.Optional(Type.Object({ policy: Type.String() })),
@@ -77,7 +79,9 @@ export function parseHost(target: string): { host: string; port?: string } | und
 function hostPatternMatches(pattern: string, target: { host: string; port?: string }): boolean {
 	const p = parseHost(pattern.startsWith("*.") ? pattern.slice(2) : pattern);
 	if (!p) return false;
-	const hostOk = pattern.startsWith("*.") ? target.host === p.host || target.host.endsWith(`.${p.host}`) : target.host === p.host;
+	const hostOk = pattern.startsWith("*.")
+		? target.host === p.host || target.host.endsWith(`.${p.host}`)
+		: target.host === p.host;
 	return hostOk && (!p.port || p.port === target.port);
 }
 
@@ -91,7 +95,10 @@ export function findScopeTarget(scope: Scope | undefined, target: string): Scope
 export function isEgressAllowed(scope: Scope | undefined, target: string): boolean {
 	const t = parseHost(target);
 	if (!scope || !t) return false;
-	return scope.targets.some((st) => hostPatternMatches(st.host, t)) || (scope.egress_allowlist ?? []).some((h) => hostPatternMatches(h, t));
+	return (
+		scope.targets.some((st) => hostPatternMatches(st.host, t)) ||
+		(scope.egress_allowlist ?? []).some((h) => hostPatternMatches(h, t))
+	);
 }
 
 const PROD_ENV = /^(prod|production|live)$/i;

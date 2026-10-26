@@ -32,7 +32,13 @@ export function putEvidence(
 		writeFileSync(tmp, buf);
 		renameSync(tmp, finalPath);
 	}
-	insertEvidence(store, { sha256: hash, missionId: meta.missionId, kind: meta.kind, path: finalPath, bytes: buf.length });
+	insertEvidence(store, {
+		sha256: hash,
+		missionId: meta.missionId,
+		kind: meta.kind,
+		path: finalPath,
+		bytes: buf.length,
+	});
 	return { sha256: hash, path: finalPath, bytes: buf.length };
 }
 

@@ -31,7 +31,13 @@ function show(fp: Fingerprint): string {
 		.join(", ");
 }
 
-export function attributorPrompt(input: { failure: Fingerprint; cornerstones: Fingerprint[]; deviations: string[]; verifierNote?: string; knownFacets: string[] }): { system: string; user: string } {
+export function attributorPrompt(input: {
+	failure: Fingerprint;
+	cornerstones: Fingerprint[];
+	deviations: string[];
+	verifierNote?: string;
+	knownFacets: string[];
+}): { system: string; user: string } {
 	return {
 		system: `${ATTRIBUTOR_MARK}
 You are the attributor of a testing system. A test template worked on several past situations (cornerstones) but produced a false positive on a new one. No known facet distinguishes them. Propose ONE situation facet (a dimension of the system under test) whose value differs between the failure and the cornerstones and explains the false positive.
@@ -66,15 +72,25 @@ export type Complete = (system: string, user: string) => Promise<string>;
 
 export function runtimeComplete(runtime: ModelRuntime, model: Model<any>): Complete {
 	return async (system, user) => {
-		const msg = await runtime.completeSimple(model, { systemPrompt: system, messages: [{ role: "user", content: user, timestamp: Date.now() }] });
+		const msg = await runtime.completeSimple(model, {
+			systemPrompt: system,
+			messages: [{ role: "user", content: user, timestamp: Date.now() }],
+		});
 		return msg.content.map((c) => ("text" in c ? c.text : "")).join("");
 	};
 }
 
 /** Two judges; the hypothesis stands only when both name the same facet. */
-export async function proposeFacetHypothesis(complete: Complete, input: Parameters<typeof attributorPrompt>[0]): Promise<{ hypothesis?: Hypothesis; judges: Array<Hypothesis | undefined> }> {
+export async function proposeFacetHypothesis(
+	complete: Complete,
+	input: Parameters<typeof attributorPrompt>[0],
+): Promise<{ hypothesis?: Hypothesis; judges: Array<Hypothesis | undefined> }> {
 	const { system, user } = attributorPrompt(input);
-	const judges = await Promise.all([complete(system, user), complete(`${system}\n(independent judge 2)`, user)].map((p) => p.then(parse).catch(() => undefined)));
+	const judges = await Promise.all(
+		[complete(system, user), complete(`${system}\n(independent judge 2)`, user)].map((p) =>
+			p.then(parse).catch(() => undefined),
+		),
+	);
 	const [a, b] = judges;
 	if (a && b && a.facet === b.facet) return { hypothesis: a, judges };
 	return { judges };

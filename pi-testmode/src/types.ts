@@ -61,4 +61,13 @@ export interface Cost {
 	context: number;
 }
 
-export const EMPTY_COST: Cost = { tokens: 0, processed: 0, input: 0, output: 0, costUsd: 0, wallClockMs: 0, turns: 0, context: 0 };
+export const EMPTY_COST: Cost = {
+	tokens: 0,
+	processed: 0,
+	input: 0,
+	output: 0,
+	costUsd: 0,
+	wallClockMs: 0,
+	turns: 0,
+	context: 0,
+};

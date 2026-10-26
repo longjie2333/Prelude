@@ -76,7 +76,9 @@ function knowledgeSection(store: Store, intentId: string, hitLevel: string | nul
 		for (const b of m.spec.bindings ?? []) out.push(`- ${m.id} bound ${b.capId} → ${b.name}@${b.sha256.slice(0, 8)}`);
 		for (const g of listGaps(store, { requestedBy: m.id })) {
 			const p = g.providerSha ? getProvider(store, g.providerSha) : undefined;
-			out.push(`- acquired ${g.capId}: ${g.status}${p ? ` → ${p.name}@${p.sha256.slice(0, 8)} (${p.trust}${p.conformanceScore !== null ? `, conformance ${p.conformanceScore}` : ""})` : ""}`);
+			out.push(
+				`- acquired ${g.capId}: ${g.status}${p ? ` → ${p.name}@${p.sha256.slice(0, 8)} (${p.trust}${p.conformanceScore !== null ? `, conformance ${p.conformanceScore}` : ""})` : ""}`,
+			);
 		}
 	}
 	// Cost against the intent each reused template was distilled from.
@@ -106,19 +108,34 @@ export function buildReport(store: Store, paths: TestmodePaths, input: ReportInp
 	const views: ClaimView[] = missions.filter((m) => m.role === "executor").flatMap((m) => claimViews(store, m));
 	const confirmedDefects = views.filter((v) => v.claim.type === "defect" && v.status === "confirmed");
 	const confirmedPasses = views.filter((v) => v.claim.type === "pass" && v.status === "confirmed");
-	const unconfirmed = views.filter((v) => (v.claim.type === "defect" || v.claim.type === "pass") && v.status !== "confirmed");
+	const unconfirmed = views.filter(
+		(v) => (v.claim.type === "defect" || v.claim.type === "pass") && v.status !== "confirmed",
+	);
 	const observations = missions.flatMap((m) =>
-		((m.envelope as Envelope | null)?.claims ?? []).filter((c) => c.type === "observation" || c.type === "coverage").map((c) => ({ m, c })),
+		((m.envelope as Envelope | null)?.claims ?? [])
+			.filter((c) => c.type === "observation" || c.type === "coverage")
+			.map((c) => ({ m, c })),
 	);
 	const byId = new Map(missions.map((m) => [m.id, m]));
 
 	const evidenceLines = (v: ClaimView): string[] => {
 		const exec = byId.get(v.missionId) as MissionRow;
 		const runs = listTestRuns(store, exec.id).filter((r) => v.claim.test_run_ids?.includes(r.id));
-		const vRuns = v.verifierId ? listTestRuns(store, v.verifierId).filter((r) => v.verifierRunIds.includes(r.id)) : [];
-		const lines = runs.map((r) => `  - executor ${r.id}: \`${r.command}\` → ${r.verdict} (stdout ${rel(join(paths.evidenceDir, r.stdoutSha ?? ""))})`);
-		lines.push(...vRuns.map((r) => `  - verifier ${r.id}: \`${r.command}\` → ${r.verdict} (stdout ${rel(join(paths.evidenceDir, r.stdoutSha ?? ""))})`));
-		for (const a of listFrozen(store, exec.id)) lines.push(`  - frozen ${rel(a.path)} (sha256 ${a.sha256.slice(0, 12)}…)`);
+		const vRuns = v.verifierId
+			? listTestRuns(store, v.verifierId).filter((r) => v.verifierRunIds.includes(r.id))
+			: [];
+		const lines = runs.map(
+			(r) =>
+				`  - executor ${r.id}: \`${r.command}\` → ${r.verdict} (stdout ${rel(join(paths.evidenceDir, r.stdoutSha ?? ""))})`,
+		);
+		lines.push(
+			...vRuns.map(
+				(r) =>
+					`  - verifier ${r.id}: \`${r.command}\` → ${r.verdict} (stdout ${rel(join(paths.evidenceDir, r.stdoutSha ?? ""))})`,
+			),
+		);
+		for (const a of listFrozen(store, exec.id))
+			lines.push(`  - frozen ${rel(a.path)} (sha256 ${a.sha256.slice(0, 12)}…)`);
 		for (const e of v.claim.evidence ?? []) lines.push(`  - ${e}`);
 		return lines;
 	};
@@ -148,7 +165,9 @@ export function buildReport(store: Store, paths: TestmodePaths, input: ReportInp
 	if (unconfirmed.length === 0) out.push("None.", "");
 	for (const v of unconfirmed) {
 		const strength = (byId.get(v.missionId)?.envelope as Envelope | null)?.test_strength;
-		out.push(`- [${v.claim.type}, ${v.status}] ${v.claim.statement}${v.note ? ` — ${v.note}` : ""}${strength ? ` (test strength: ${strength})` : ""}`);
+		out.push(
+			`- [${v.claim.type}, ${v.status}] ${v.claim.statement}${v.note ? ` — ${v.note}` : ""}${strength ? ` (test strength: ${strength})` : ""}`,
+		);
 	}
 	if (unconfirmed.length) out.push("");
 
@@ -158,20 +177,34 @@ export function buildReport(store: Store, paths: TestmodePaths, input: ReportInp
 		out.push("");
 	}
 
-	const deviations = missions.flatMap((m) => ((m.envelope as Envelope | null)?.deviations ?? []).map((d) => ({ m, d })));
+	const deviations = missions.flatMap((m) =>
+		((m.envelope as Envelope | null)?.deviations ?? []).map((d) => ({ m, d })),
+	);
 	if (deviations.length > 0) {
 		out.push("## Deviations", "");
-		for (const { m, d } of deviations) out.push(`- (${m.id} @ ${d.at}) expected "${d.expected}", observed "${d.observed}"${d.agent_hypothesis ? ` — hypothesis: ${d.agent_hypothesis}` : ""}`);
+		for (const { m, d } of deviations)
+			out.push(
+				`- (${m.id} @ ${d.at}) expected "${d.expected}", observed "${d.observed}"${d.agent_hypothesis ? ` — hypothesis: ${d.agent_hypothesis}` : ""}`,
+			);
 		out.push("");
 	}
 
 	out.push("## Assumptions", "");
-	out.push(...((ir.assumptions ?? []).length ? (ir.assumptions as string[]).map((a) => `- ${a}`) : ["- None recorded."]), "");
+	out.push(
+		...((ir.assumptions ?? []).length ? (ir.assumptions as string[]).map((a) => `- ${a}`) : ["- None recorded."]),
+		"",
+	);
 
 	const notCovered = [
-		...missions.flatMap((m) => ((m.envelope as Envelope | null)?.goal_coverage ?? []).filter((g) => g.status !== "covered").map((g) => `${g.goal} (${g.status})`)),
+		...missions.flatMap((m) =>
+			((m.envelope as Envelope | null)?.goal_coverage ?? [])
+				.filter((g) => g.status !== "covered")
+				.map((g) => `${g.goal} (${g.status})`),
+		),
 		...(input.uncoveredTargets ?? []),
-		...missions.filter((m) => !["completed"].includes(m.status)).map((m) => `${m.role} ${m.id} ended ${m.status}${m.error ? `: ${m.error}` : ""}`),
+		...missions
+			.filter((m) => !["completed"].includes(m.status))
+			.map((m) => `${m.role} ${m.id} ended ${m.status}${m.error ? `: ${m.error}` : ""}`),
 	];
 	out.push("## Not covered", "");
 	out.push(...(notCovered.length ? notCovered.map((n) => `- ${n}`) : ["- Nothing outstanding."]), "");
@@ -193,5 +226,12 @@ export function buildReport(store: Store, paths: TestmodePaths, input: ReportInp
 	const path = join(paths.reportsDir, `${intent.id}.md`);
 	const markdown = out.join("\n");
 	writeFileSync(path, markdown, "utf8");
-	return { path, markdown, confirmedDefects: confirmedDefects.length, confirmedPasses: confirmedPasses.length, unconfirmed: unconfirmed.length, cost: total };
+	return {
+		path,
+		markdown,
+		confirmedDefects: confirmedDefects.length,
+		confirmedPasses: confirmedPasses.length,
+		unconfirmed: unconfirmed.length,
+		cost: total,
+	};
 }

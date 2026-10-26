@@ -22,7 +22,9 @@ export interface ApprovalUI {
 	select(title: string, options: string[]): Promise<string | undefined>;
 }
 
-export type ApprovalOutcome = { approved: true; scope: "once" | "session" | "always" | "standing" } | { approved: false; reason: string };
+export type ApprovalOutcome =
+	| { approved: true; scope: "once" | "session" | "always" | "standing" }
+	| { approved: false; reason: string };
 
 const ONCE = "Allow once";
 const SESSION = "Allow for this session";
@@ -49,7 +51,8 @@ export class Approvals {
 
 	private async decide(req: ApprovalRequest): Promise<ApprovalOutcome> {
 		// R4 always needs a human decision; only lower tiers reuse standing approvals.
-		if (req.tier !== "R4" && hasStandingApproval(this.store, req.subject)) return { approved: true, scope: "standing" };
+		if (req.tier !== "R4" && hasStandingApproval(this.store, req.subject))
+			return { approved: true, scope: "standing" };
 		if (this.sessionApproved.has(req.subject)) return { approved: true, scope: "session" };
 
 		const ui = this.getUI();
@@ -74,10 +77,27 @@ export class Approvals {
 		return { approved: false, reason: choice === DENY ? "denied by user" : "approval dialog dismissed" };
 	}
 
-	private record(req: ApprovalRequest, decision: "approved" | "denied", scope: "once" | "session" | "always", reason?: string): void {
+	private record(
+		req: ApprovalRequest,
+		decision: "approved" | "denied",
+		scope: "once" | "session" | "always",
+		reason?: string,
+	): void {
 		this.store.tx(() => {
-			insertApproval(this.store, { id: newId("ap"), missionId: req.missionId ?? null, tier: req.tier, subject: req.subject, decision, scope });
-			audit(this.store, { actor: req.actor, event: "approval", decision, reason: `${req.subject} (${scope})${reason ? `: ${reason}` : ""}` });
+			insertApproval(this.store, {
+				id: newId("ap"),
+				missionId: req.missionId ?? null,
+				tier: req.tier,
+				subject: req.subject,
+				decision,
+				scope,
+			});
+			audit(this.store, {
+				actor: req.actor,
+				event: "approval",
+				decision,
+				reason: `${req.subject} (${scope})${reason ? `: ${reason}` : ""}`,
+			});
 		});
 	}
 }

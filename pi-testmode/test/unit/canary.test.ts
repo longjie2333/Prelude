@@ -12,7 +12,11 @@ async function canary(opts: Parameters<typeof startCanary>[0]) {
 	const c = await startCanary(opts);
 	close = c.close;
 	const json = async (method: string, path: string, body?: unknown) => {
-		const r = await fetch(`${c.url}${path}`, { method, headers: { "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+		const r = await fetch(`${c.url}${path}`, {
+			method,
+			headers: { "content-type": "application/json" },
+			body: body ? JSON.stringify(body) : undefined,
+		});
 		return { status: r.status, body: (await r.json()) as Record<string, unknown> };
 	};
 	return { ...c, json };
@@ -49,7 +53,8 @@ describe("canary", () => {
 		const first = await c.json("GET", "/products?page=1&size=3");
 		const pages = first.body.pages as number;
 		let seen = 0;
-		for (let i = 1; i <= pages; i++) seen += ((await c.json("GET", `/products?page=${i}&size=3`)).body.items as unknown[]).length;
+		for (let i = 1; i <= pages; i++)
+			seen += ((await c.json("GET", `/products?page=${i}&size=3`)).body.items as unknown[]).length;
 		expect(seen).toBe((first.body.total as number) - 1);
 	});
 

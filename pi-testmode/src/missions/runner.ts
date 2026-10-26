@@ -18,8 +18,18 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { MCP_SECTION, mcpBindings, mcpGuard, missionMcpExtensions, toolPrefix } from "../capabilities/mcp-bind.ts";
 import { quarantineProvider, verifyBinding } from "../capabilities/registry.ts";
-import { createCapabilityRequestTool, createProviderRegisterTool, createSkillValidateTool } from "../capabilities/tools.ts";
-import { type CapabilityRequest, createArtifactFreezeTool, createMissionSubmitTool, createTestRunTool, type MissionToolHost } from "../harness/tools.ts";
+import {
+	createCapabilityRequestTool,
+	createProviderRegisterTool,
+	createSkillValidateTool,
+} from "../capabilities/tools.ts";
+import {
+	type CapabilityRequest,
+	createArtifactFreezeTool,
+	createMissionSubmitTool,
+	createTestRunTool,
+	type MissionToolHost,
+} from "../harness/tools.ts";
 import { renderTemplatesSection } from "../knowledge/render.ts";
 import { getCapability, getTemplate, listFacets } from "../knowledge/store.ts";
 import { createTemplateProposeTool } from "../learning/curator.ts";
@@ -33,7 +43,14 @@ import { loadScope } from "../kernel/scope.ts";
 import type { TestmodePaths } from "../paths.ts";
 import { isolationLevel, missionSandboxExtension, sandboxConfigFor } from "../sandbox/index.ts";
 import type { Store } from "../store/db.ts";
-import { audit, getMission, listFrozen, type MissionRow, updateMission, voidUnfinishedTestRuns } from "../store/repos.ts";
+import {
+	audit,
+	getMission,
+	listFrozen,
+	type MissionRow,
+	updateMission,
+	voidUnfinishedTestRuns,
+} from "../store/repos.ts";
 import type { Cost, MissionStatus } from "../types.ts";
 import { errorMessage, nowIso } from "../util.ts";
 import type { Envelope } from "./envelope.ts";
@@ -113,7 +130,8 @@ interface Pending {
 	resume?: { sm: SessionManager; note: string };
 }
 
-const NETWORK_ERROR = /fetch failed|network|ECONN|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up|timed? ?out|overloaded|503|502|504/i;
+const NETWORK_ERROR =
+	/fetch failed|network|ECONN|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up|timed? ?out|overloaded|503|502|504/i;
 
 export class SdkMissionRunner implements MissionRunner {
 	private readonly active = new Map<string, Active>();
@@ -153,7 +171,10 @@ export class SdkMissionRunner implements MissionRunner {
 		if (!m) return { kind: "failed", reason: `unknown mission ${missionId}` };
 		if (this.isActive(missionId)) return { kind: "failed", reason: "mission is already running" };
 		if (!["interrupted", "blocked", "aborted", "queued"].includes(m.status)) {
-			return { kind: "failed", reason: `mission is ${m.status}; only interrupted, blocked, or aborted missions resume` };
+			return {
+				kind: "failed",
+				reason: `mission is ${m.status}; only interrupted, blocked, or aborted missions resume`,
+			};
 		}
 		const voided = voidUnfinishedTestRuns(store, missionId);
 
@@ -172,12 +193,25 @@ export class SdkMissionRunner implements MissionRunner {
 		// Crashed before the first assistant reply: nothing was persisted, re-run the same spec.
 		if (!m.sessionPath || !existsSync(m.sessionPath)) {
 			store.tx(() => {
-				updateMission(store, missionId, { status: "queued", interruptReason: null, resumeCount: m.resumeCount + 1, ownerPid: null, notifiedAt: null });
-				audit(store, { actor: "main", event: "mission_restart", reason: `${missionId}: session not persisted yet` });
+				updateMission(store, missionId, {
+					status: "queued",
+					interruptReason: null,
+					resumeCount: m.resumeCount + 1,
+					ownerPid: null,
+					notifiedAt: null,
+				});
+				audit(store, {
+					actor: "main",
+					event: "mission_restart",
+					reason: `${missionId}: session not persisted yet`,
+				});
 			});
 			this.pending.push({ missionId });
 			this.drain();
-			return { kind: "restarted", reason: "session was not persisted before the interruption; re-running the same spec" };
+			return {
+				kind: "restarted",
+				reason: "session was not persisted before the interruption; re-running the same spec",
+			};
 		}
 
 		const sm = SessionManager.open(m.sessionPath, m.runDir, this.opts.paths.root);
@@ -185,16 +219,34 @@ export class SdkMissionRunner implements MissionRunner {
 		const unknown = resolutions.filter((r) => r.kind === "unknown_side_effect");
 		if (unknown.length > 0 && !opts.confirmUnknownSideEffects) {
 			store.tx(() => {
-				updateMission(store, missionId, { status: "blocked", error: `side effects with unknown outcome: ${unknown.map((u) => u.call.toolName).join(", ")}` });
-				audit(store, { actor: "main", event: "mission_blocked", reason: `${missionId}: unknown side effects, needs confirmation` });
+				updateMission(store, missionId, {
+					status: "blocked",
+					error: `side effects with unknown outcome: ${unknown.map((u) => u.call.toolName).join(", ")}`,
+				});
+				audit(store, {
+					actor: "main",
+					event: "mission_blocked",
+					reason: `${missionId}: unknown side effects, needs confirmation`,
+				});
 			});
 			return { kind: "needs_confirmation", tools: unknown.map((u) => u.call.toolName) };
 		}
 		applyResolutions(sm, resolutions);
 		const note = recoveryNote(resolutions, voided, m.interruptReason ?? m.status);
 		store.tx(() => {
-			updateMission(store, missionId, { status: "queued", interruptReason: null, error: null, resumeCount: m.resumeCount + 1, ownerPid: null, notifiedAt: null });
-			audit(store, { actor: "main", event: "mission_resume", reason: `${missionId}: ${resolutions.map((r) => `${r.call.toolName}=${r.kind}`).join(", ") || "no orphans"}` });
+			updateMission(store, missionId, {
+				status: "queued",
+				interruptReason: null,
+				error: null,
+				resumeCount: m.resumeCount + 1,
+				ownerPid: null,
+				notifiedAt: null,
+			});
+			audit(store, {
+				actor: "main",
+				event: "mission_resume",
+				reason: `${missionId}: ${resolutions.map((r) => `${r.call.toolName}=${r.kind}`).join(", ") || "no orphans"}`,
+			});
 		});
 		this.pending.push({ missionId, resume: { sm, note } });
 		this.drain();
@@ -206,7 +258,12 @@ export class SdkMissionRunner implements MissionRunner {
 		if (idx >= 0) {
 			this.pending.splice(idx, 1);
 			const m = getMission(this.opts.store, missionId);
-			if (m) this.finalize(m, "aborted", { cost: m.cost, error: `aborted before start (${reason})`, interruptReason: reason === "shutdown" ? "shutdown" : null });
+			if (m)
+				this.finalize(m, "aborted", {
+					cost: m.cost,
+					error: `aborted before start (${reason})`,
+					interruptReason: reason === "shutdown" ? "shutdown" : null,
+				});
 			return;
 		}
 		const a = this.active.get(missionId);
@@ -280,13 +337,18 @@ export class SdkMissionRunner implements MissionRunner {
 				startedAt: initial.startedAt ?? nowIso(),
 				sessionPath: sessionPath ?? undefined,
 			});
-			audit(store, { actor: `mission:${initial.id}`, event: next.resume ? "mission_resumed" : "mission_started", reason: `${initial.role} ${initial.riskTier}` });
+			audit(store, {
+				actor: `mission:${initial.id}`,
+				event: next.resume ? "mission_resumed" : "mission_started",
+				reason: `${initial.role} ${initial.riskTier}`,
+			});
 		});
 		const m = getMission(store, initial.id) as MissionRow;
 
 		const role = loadRole(m.role);
 		const runtime = await this.opts.modelRuntime();
-		const model = (m.spec.model && runtime.getModel(m.spec.model.provider, m.spec.model.id)) || this.opts.defaultModel?.();
+		const model =
+			(m.spec.model && runtime.getModel(m.spec.model.provider, m.spec.model.id)) || this.opts.defaultModel?.();
 		if (!model) {
 			this.finalize(m, "failed", { cost: m.cost, error: "no model available for the mission" });
 			return;
@@ -297,14 +359,27 @@ export class SdkMissionRunner implements MissionRunner {
 			const check = verifyBinding(b);
 			if (!check.ok) {
 				quarantineProvider(store, b.sha256, `mission:${m.id}`, check.reason);
-				this.finalize(m, "failed", { cost: m.cost, error: `provider ${b.name}@${b.sha256.slice(0, 8)} for ${b.capId} blocked: ${check.reason}` });
+				this.finalize(m, "failed", {
+					cost: m.cost,
+					error: `provider ${b.name}@${b.sha256.slice(0, 8)} for ${b.capId} blocked: ${check.reason}`,
+				});
 				return;
 			}
 		}
 
 		// MCP providers bound to this mission (M2-7); the Toolsmith loads the MCP extension to probe servers.
-		const mcpBound = mcpBindings(m.spec.bindings ?? []).map((binding) => ({ binding, semantics: getCapability(store, binding.capId)?.semantics ?? binding.capId }));
-		const guard = mcpGuard(mcpBound, (b, now) => quarantineProvider(store, b.sha256, `mission:${m.id}`, `MCP tool definitions changed (${b.mcp?.toolDefsSha.slice(0, 8)} → ${now.slice(0, 8)})`));
+		const mcpBound = mcpBindings(m.spec.bindings ?? []).map((binding) => ({
+			binding,
+			semantics: getCapability(store, binding.capId)?.semantics ?? binding.capId,
+		}));
+		const guard = mcpGuard(mcpBound, (b, now) =>
+			quarantineProvider(
+				store,
+				b.sha256,
+				`mission:${m.id}`,
+				`MCP tool definitions changed (${b.mcp?.toolDefsSha.slice(0, 8)} → ${now.slice(0, 8)})`,
+			),
+		);
 		const useMcp = mcpBound.length > 0 || role.tools.includes("provider_register");
 		let missionPi: ExtensionAPI | undefined;
 
@@ -317,16 +392,27 @@ export class SdkMissionRunner implements MissionRunner {
 			root: paths.root,
 			paths,
 			spec: m.spec,
-			requestCapability: this.opts.hooks.requestCapability ? (req) => this.opts.hooks.requestCapability?.(m.id, req) ?? { message: "unavailable" } : undefined,
-			approve: async (req) => (await this.opts.hooks.approve({ actor: `mission:${m.id}`, missionId: m.id, ...req })).approved,
+			requestCapability: this.opts.hooks.requestCapability
+				? (req) => this.opts.hooks.requestCapability?.(m.id, req) ?? { message: "unavailable" }
+				: undefined,
+			approve: async (req) =>
+				(await this.opts.hooks.approve({ actor: `mission:${m.id}`, missionId: m.id, ...req })).approved,
 			probeMcp: async (server, config) => {
 				const pi = missionPi;
 				if (!pi) throw new Error("mission extension runtime unavailable");
 				pi.registerMcpServer(server, { ...(config as object), exposure: "deferred" } as never);
 				const prefix = toolPrefix(server);
 				try {
-					const tools = await waitForTools(() => pi.getAllTools().filter((t) => t.name.startsWith(prefix)), 15_000);
-					return tools.map((t) => ({ name: t.name, description: t.description, parameters: t.parameters, annotations: t.annotations }));
+					const tools = await waitForTools(
+						() => pi.getAllTools().filter((t) => t.name.startsWith(prefix)),
+						15_000,
+					);
+					return tools.map((t) => ({
+						name: t.name,
+						description: t.description,
+						parameters: t.parameters,
+						annotations: t.annotations,
+					}));
 				} finally {
 					pi.unregisterMcpServer(server);
 				}
@@ -339,7 +425,9 @@ export class SdkMissionRunner implements MissionRunner {
 		};
 		const missionSection = renderMissionSpec(m.spec, m.runDir);
 		const extraSections = this.missionSections(m);
-		const skillPaths = [...new Set((m.spec.bindings ?? []).filter((b) => b.kind === "skill" && b.path).map((b) => b.path as string))];
+		const skillPaths = [
+			...new Set((m.spec.bindings ?? []).filter((b) => b.kind === "skill" && b.path).map((b) => b.path as string)),
+		];
 		const factories: ExtensionFactory[] = [
 			policyExtension({
 				store: () => store,
@@ -356,7 +444,12 @@ export class SdkMissionRunner implements MissionRunner {
 					createTestRunTool(toolHost),
 					createArtifactFreezeTool(toolHost),
 					// mission_submit is active in every role, so it carries the MCP description rewrite (extensions.md "Tool exposure").
-					mcpBound.length ? { ...submit, prepareLoadout: (l: Parameters<typeof guard.prepareLoadout>[0]) => guard.prepareLoadout(l) } : submit,
+					mcpBound.length
+						? {
+								...submit,
+								prepareLoadout: (l: Parameters<typeof guard.prepareLoadout>[0]) => guard.prepareLoadout(l),
+							}
+						: submit,
 					createCapabilityRequestTool(toolHost),
 					createSkillValidateTool(toolHost),
 					createProviderRegisterTool(toolHost),
@@ -388,7 +481,12 @@ export class SdkMissionRunner implements MissionRunner {
 		if (!this.opts.noSandbox && role.tools.includes("bash")) {
 			const sandbox = await missionSandboxExtension(
 				paths.root,
-				sandboxConfigFor({ scope: loadScope(paths.scopeFile).scope, targets: m.spec.targets, runDir: m.runDir, agentDir: this.opts.agentDir }),
+				sandboxConfigFor({
+					scope: loadScope(paths.scopeFile).scope,
+					targets: m.spec.targets,
+					runDir: m.runDir,
+					agentDir: this.opts.agentDir,
+				}),
 			);
 			if (sandbox) {
 				factories.push(sandbox);
@@ -445,17 +543,28 @@ export class SdkMissionRunner implements MissionRunner {
 			} else if (budget.state() === "exceeded") {
 				if (!graceSteered) {
 					graceSteered = true;
-					void session.steer("[testmode] Budget exhausted. Call mission_submit now (status partial) with what you have; no other tool calls.").catch(() => undefined);
+					void session
+						.steer(
+							"[testmode] Budget exhausted. Call mission_submit now (status partial) with what you have; no other tool calls.",
+						)
+						.catch(() => undefined);
 				}
 			} else if (budget.shouldWarn()) {
 				void session
-					.steer("[testmode] Budget is 80% used. Wrap up now: finish the current check and call mission_submit with what you have.")
+					.steer(
+						"[testmode] Budget is 80% used. Wrap up now: finish the current check and call mission_submit with what you have.",
+					)
 					.catch(() => undefined);
 			}
 		};
 		const unsubscribe = session.subscribe((event) => {
 			if (event.type !== "message_end") return;
-			const msg = event.message as { role?: string; usage?: Parameters<BudgetTracker["addUsage"]>[0]; stopReason?: string; errorMessage?: string };
+			const msg = event.message as {
+				role?: string;
+				usage?: Parameters<BudgetTracker["addUsage"]>[0];
+				stopReason?: string;
+				errorMessage?: string;
+			};
 			if (msg.role !== "assistant") return;
 			budget.addUsage(msg.usage);
 			lastError = msg.stopReason === "error" ? (msg.errorMessage ?? "model error") : undefined;
@@ -474,12 +583,16 @@ export class SdkMissionRunner implements MissionRunner {
 
 		let thrown: string | undefined;
 		try {
-			const first = next.resume?.note ?? "Begin the mission described in the <mission> section. Finish with mission_submit.";
+			const first =
+				next.resume?.note ?? "Begin the mission described in the <mission> section. Finish with mission_submit.";
 			await session.prompt(first, { expandPromptTemplates: false });
 			if (!entry.envelope && !entry.abortReason && !lastError) {
-				await session.prompt("[testmode] You ended without calling mission_submit. Call mission_submit now with your result envelope.", {
-					expandPromptTemplates: false,
-				});
+				await session.prompt(
+					"[testmode] You ended without calling mission_submit. Call mission_submit now with your result envelope.",
+					{
+						expandPromptTemplates: false,
+					},
+				);
 			}
 		} catch (err) {
 			thrown = errorMessage(err);
@@ -495,13 +608,23 @@ export class SdkMissionRunner implements MissionRunner {
 		} else if (entry.abortReason === "budget") {
 			this.finalize(m, "partial", { cost, error: "budget exhausted before mission_submit" });
 		} else if (entry.abortReason) {
-			this.finalize(m, "aborted", { cost, error: `aborted (${entry.abortReason})`, interruptReason: entry.abortReason === "shutdown" ? "shutdown" : null });
+			this.finalize(m, "aborted", {
+				cost,
+				error: `aborted (${entry.abortReason})`,
+				interruptReason: entry.abortReason === "shutdown" ? "shutdown" : null,
+			});
 		} else {
 			const error = lastError ?? thrown;
 			if (error && NETWORK_ERROR.test(error)) {
 				// M1-14 §5: retries exhausted. Keep the session; resumable once the network is back.
 				store.tx(() => {
-					updateMission(store, m.id, { status: "interrupted", interruptReason: "network", cost, error, ownerPid: null });
+					updateMission(store, m.id, {
+						status: "interrupted",
+						interruptReason: "network",
+						cost,
+						error,
+						ownerPid: null,
+					});
 					audit(store, { actor: `mission:${m.id}`, event: "mission_interrupted", reason: `network: ${error}` });
 				});
 				this.opts.hooks.onMissionEnd(m.id);
@@ -557,7 +680,15 @@ export class SdkMissionRunner implements MissionRunner {
 		}
 		const dt = m.spec.deltaTask;
 		if (dt) {
-			out.delta = lines(["<delta>", `delta_id: ${dt.deltaId}`, `op: ${dt.op}`, `target: ${dt.target}`, `condition: ${dt.condition}`, dt.digest, "</delta>"]);
+			out.delta = lines([
+				"<delta>",
+				`delta_id: ${dt.deltaId}`,
+				`op: ${dt.op}`,
+				`target: ${dt.target}`,
+				`condition: ${dt.condition}`,
+				dt.digest,
+				"</delta>",
+			]);
 		}
 		const k = m.spec.curate;
 		if (k && !dt) {
@@ -593,7 +724,12 @@ export class SdkMissionRunner implements MissionRunner {
 					endedAt: nowIso(),
 					ownerPid: null,
 				});
-				audit(store, { actor: `mission:${m.id}`, event: "mission_end", decision: status, reason: r.error ?? undefined });
+				audit(store, {
+					actor: `mission:${m.id}`,
+					event: "mission_end",
+					decision: status,
+					reason: r.error ?? undefined,
+				});
 			});
 		} catch {
 			return; // store closed (shutdown); the next startup scan reconciles

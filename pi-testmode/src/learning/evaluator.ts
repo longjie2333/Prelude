@@ -46,7 +46,8 @@ export interface Evaluation {
  * `sys.exit(main())`, `process.exit(ok ? 0 : 1)`), an assertion, a throw/raise, or `set -e`.
  * `process.exit(0)` / `exit 0` alone cannot fail.
  */
-const ASSERTS = /process\.exit\(\s*(?!0\s*\))[^)]|process\.exitCode\s*=|\bassert\b|\bexpect\(|\bthrow\b|\braise\b|\bexit\s+(?!0\b)\S|sys\.exit\(\s*(?!0\s*\))[^)]|\bset\s+-[a-z]*e/;
+const ASSERTS =
+	/process\.exit\(\s*(?!0\s*\))[^)]|process\.exitCode\s*=|\bassert\b|\bexpect\(|\bthrow\b|\braise\b|\bexit\s+(?!0\b)\S|sys\.exit\(\s*(?!0\s*\))[^)]|\bset\s+-[a-z]*e/;
 const SCRIPT = /\.(m?[jt]s|cjs|sh|py)$/i;
 
 /** Agent-core §10.3 #8: tampering with frozen artifacts, tests that cannot fail, verifier-reported issues. */
@@ -55,7 +56,12 @@ export function detectCheating(s: Store, m: MissionRow): string[] {
 	const actor = `mission:${m.id}`;
 	for (const a of listAudit(s, { actor })) {
 		if (a.event === "artifact_tamper") out.push(`frozen artifact changed before a test_run: ${a.reason ?? ""}`);
-		if (a.event === "tool_call" && a.decision === "block" && /frozen test artifact|modify scope\.json/.test(a.reason ?? "")) out.push(`attempted to modify a frozen artifact (${a.tool})`);
+		if (
+			a.event === "tool_call" &&
+			a.decision === "block" &&
+			/frozen test artifact|modify scope\.json/.test(a.reason ?? "")
+		)
+			out.push(`attempted to modify a frozen artifact (${a.tool})`);
 	}
 	const v0 = verifierOf(s, m.id);
 	const runs = [...listTestRuns(s, m.id), ...(v0 ? listTestRuns(s, v0.id) : [])];
@@ -67,18 +73,25 @@ export function detectCheating(s: Store, m: MissionRow): string[] {
 		const name = nameOf(f.path);
 		// Evidence beats heuristics: a run of the script that exited non-zero proves it can fail.
 		if (runs.some((r) => r.command.toLowerCase().includes(name) && r.exitCode !== null && r.exitCode !== 0)) continue;
-		if (!ASSERTS.test(readFileSync(f.path, "utf8"))) out.push(`${name} has no way to fail (no assertion or non-zero exit)`);
+		if (!ASSERTS.test(readFileSync(f.path, "utf8")))
+			out.push(`${name} has no way to fail (no assertion or non-zero exit)`);
 	}
 	for (const issue of (v0?.envelope as Envelope | null)?.integrity_issues ?? []) out.push(`verifier: ${issue}`);
 	return out;
 }
 
-function selfChecks(s: Store, verifier: MissionRow | undefined, verifiedDefects: number): { sensitivity: SelfCheck; specificity: SelfCheck } {
+function selfChecks(
+	s: Store,
+	verifier: MissionRow | undefined,
+	verifiedDefects: number,
+): { sensitivity: SelfCheck; specificity: SelfCheck } {
 	const env = verifier?.envelope as Envelope | null | undefined;
 	const runs = verifier ? new Map(listTestRuns(s, verifier.id).map((r) => [r.id, r])) : new Map<string, TestRunRow>();
 	const check = (kind: "sensitivity" | "specificity", need: "fail" | "pass"): SelfCheck => {
 		const ids = (env?.oracle_checks ?? []).filter((c) => c.kind === kind).flatMap((c) => c.test_run_ids);
-		const rs = ids.map((id) => runs.get(id)).filter((r): r is TestRunRow => !!r && (r.verdict === "pass" || r.verdict === "fail"));
+		const rs = ids
+			.map((id) => runs.get(id))
+			.filter((r): r is TestRunRow => !!r && (r.verdict === "pass" || r.verdict === "fail"));
 		if (rs.length === 0) return "unavailable";
 		return rs.every((r) => r.verdict === need) ? "pass" : "fail";
 	};
@@ -104,11 +117,15 @@ export function evaluateMission(s: Store, missionId: string): Evaluation | undef
 	let flaky = false;
 	for (const v of [...defects, ...passes]) {
 		const need = v.claim.type === "defect" ? "fail" : "pass";
-		const cited = [...(v.claim.test_run_ids ?? []), ...v.verifierRunIds].map((id) => byId.get(id)).filter((r): r is TestRunRow => !!r);
+		const cited = [...(v.claim.test_run_ids ?? []), ...v.verifierRunIds]
+			.map((id) => byId.get(id))
+			.filter((r): r is TestRunRow => !!r);
 		const d = cited.filter((r) => r.verdict === "pass" || r.verdict === "fail");
 		decided += d.length;
 		agree += d.filter((r) => r.verdict === need).length;
-		const vd = v.verifierRunIds.map((id) => byId.get(id)).filter((r) => r && (r.verdict === "pass" || r.verdict === "fail"));
+		const vd = v.verifierRunIds
+			.map((id) => byId.get(id))
+			.filter((r) => r && (r.verdict === "pass" || r.verdict === "fail"));
 		if (new Set(vd.map((r) => r?.verdict)).size > 1) flaky = true;
 	}
 	const verifiedDefects = defects.filter((v) => v.status === "confirmed").length;
@@ -138,7 +155,8 @@ export function evaluateMission(s: Store, missionId: string): Evaluation | undef
 
 	const cheating = detectCheating(s, m);
 	let credibility = 1;
-	if (!verifier) credibility *= 0.5; // no independent replay
+	if (!verifier)
+		credibility *= 0.5; // no independent replay
 	else if (verifier.status !== "completed") credibility *= 0.5;
 	if (flaky) credibility *= 0.5;
 	if (decided > 0 && signals.reproducibility < 0.6) credibility *= 0.7;

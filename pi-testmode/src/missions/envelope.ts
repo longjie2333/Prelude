@@ -17,10 +17,16 @@ export const ClaimSchema = Type.Object({
 	type: StringEnum(CLAIM_TYPES),
 	statement: Type.String({ description: "What is claimed, one sentence" }),
 	test_run_ids: Type.Optional(
-		Type.Array(Type.String(), { description: "test_run ids backing this claim; required for defect and pass claims" }),
+		Type.Array(Type.String(), {
+			description: "test_run ids backing this claim; required for defect and pass claims",
+		}),
 	),
-	evidence: Type.Optional(Type.Array(Type.String(), { description: "Evidence refs (ev://<sha256>) or run-directory paths" })),
-	oracle: Type.Optional(Type.Object({ kind: Type.String(), strength: StringEnum(["low", "medium", "high"] as const) })),
+	evidence: Type.Optional(
+		Type.Array(Type.String(), { description: "Evidence refs (ev://<sha256>) or run-directory paths" }),
+	),
+	oracle: Type.Optional(
+		Type.Object({ kind: Type.String(), strength: StringEnum(["low", "medium", "high"] as const) }),
+	),
 	reproducibility: Type.Optional(Type.String({ description: "e.g. 5/5" })),
 	minimal_repro: Type.Optional(Type.String({ description: "Smallest command or steps that reproduce the defect" })),
 });
@@ -30,7 +36,9 @@ export const EnvelopeSchema = Type.Object({
 	summary: Type.String({ description: "Two or three sentences on what was done and found" }),
 	claims: Type.Array(ClaimSchema),
 	goal_coverage: Type.Optional(
-		Type.Array(Type.Object({ goal: Type.String(), status: StringEnum(["covered", "partial", "not_covered"] as const) })),
+		Type.Array(
+			Type.Object({ goal: Type.String(), status: StringEnum(["covered", "partial", "not_covered"] as const) }),
+		),
 	),
 	deviations: Type.Optional(
 		Type.Array(
@@ -43,7 +51,9 @@ export const EnvelopeSchema = Type.Object({
 		),
 	),
 	capability_issues: Type.Optional(Type.Array(Type.String())),
-	test_strength: Type.Optional(Type.String({ description: "How hard the target was exercised (e.g. 50 concurrent orders x 5 runs)" })),
+	test_strength: Type.Optional(
+		Type.String({ description: "How hard the target was exercised (e.g. 50 concurrent orders x 5 runs)" }),
+	),
 	verification: Type.Optional(
 		Type.Array(
 			Type.Object({
@@ -55,7 +65,9 @@ export const EnvelopeSchema = Type.Object({
 		),
 	),
 	fingerprint: Type.Optional(
-		Type.Array(FingerprintEntrySchema, { description: "Scout: situation fingerprint, using the facet names listed in your mission" }),
+		Type.Array(FingerprintEntrySchema, {
+			description: "Scout: situation fingerprint, using the facet names listed in your mission",
+		}),
 	),
 	integrity_issues: Type.Optional(
 		Type.Array(Type.String(), {
@@ -67,7 +79,8 @@ export const EnvelopeSchema = Type.Object({
 		Type.Array(
 			Type.Object({
 				kind: StringEnum(["sensitivity", "specificity"] as const, {
-					description: "sensitivity: the oracle run against a seeded fault must fail; specificity: clean reruns must all pass",
+					description:
+						"sensitivity: the oracle run against a seeded fault must fail; specificity: clean reruns must all pass",
 				}),
 				test_run_ids: Type.Array(Type.String()),
 			}),
@@ -90,7 +103,11 @@ export function expectedVerdict(claimType: string): Verdict | undefined {
 	return claimType === "defect" ? "fail" : claimType === "pass" ? "pass" : undefined;
 }
 
-export function validateClaimsAgainstRuns(claims: readonly Claim[], runs: readonly TestRunRow[], missionId: string): string[] {
+export function validateClaimsAgainstRuns(
+	claims: readonly Claim[],
+	runs: readonly TestRunRow[],
+	missionId: string,
+): string[] {
 	const byId = new Map(runs.map((r) => [r.id, r]));
 	const errors: string[] = [];
 	const ids = new Set<string>();

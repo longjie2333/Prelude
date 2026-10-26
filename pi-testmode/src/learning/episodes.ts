@@ -4,7 +4,15 @@
  */
 import { assembleFingerprint, mergeFingerprints, normalizeFingerprint, sutKeyOf } from "../knowledge/fingerprint.ts";
 import type { Fingerprint } from "../knowledge/schema.ts";
-import { getEpisodeByMission, getTemplate, insertEpisode, insertTemplateUse, listEpisodes, listGaps, listRetrievals } from "../knowledge/store.ts";
+import {
+	getEpisodeByMission,
+	getTemplate,
+	insertEpisode,
+	insertTemplateUse,
+	listEpisodes,
+	listGaps,
+	listRetrievals,
+} from "../knowledge/store.ts";
 import type { Envelope } from "../missions/envelope.ts";
 import type { IntentIR } from "../orchestrator/intent.ts";
 import type { Store } from "../store/db.ts";
@@ -22,7 +30,9 @@ export function recordEpisode(s: Store, m: MissionRow): string | undefined {
 
 	// Raw fingerprint: what was known about the SUT (latest scout), what the intent states, and what
 	// this mission itself reported (any role may report facets, e.g. when asked to probe one).
-	const reported = env?.fingerprint?.length ? normalizeFingerprint(s, env.fingerprint, { mission: m.id }).raw : undefined;
+	const reported = env?.fingerprint?.length
+		? normalizeFingerprint(s, env.fingerprint, { mission: m.id }).raw
+		: undefined;
 	let fingerprint: Fingerprint;
 	if (m.role === "scout") {
 		// A scout's observation replaces the previous one; the intent's facets stay authoritative.
@@ -34,7 +44,12 @@ export function recordEpisode(s: Store, m: MissionRow): string | undefined {
 	const gaps = listGaps(s, { requestedBy: m.id });
 	const deviations = [
 		...(env?.deviations ?? []),
-		...gaps.map((g) => ({ at: "capability", expected: "capability bound by the template", observed: `requested ${g.capId}`, agent_hypothesis: g.spec.semantics })),
+		...gaps.map((g) => ({
+			at: "capability",
+			expected: "capability bound by the template",
+			observed: `requested ${g.capId}`,
+			agent_hypothesis: g.spec.semantics,
+		})),
 	];
 	const id = newId("ep");
 	s.tx(() => {
@@ -55,7 +70,12 @@ export function recordEpisode(s: Store, m: MissionRow): string | undefined {
 		const injected = new Map((m.spec.templates ?? []).map((t) => [t.id, t.version]));
 		const declared = new Map((env?.used_templates ?? []).map((u) => [u.id.replace(/@\d+$/, ""), u.role]));
 		for (const [tid, version] of injected) {
-			insertTemplateUse(s, { episodeId: id, templateId: tid, version, role: declared.get(tid) === "applied" ? "applied" : "cited" });
+			insertTemplateUse(s, {
+				episodeId: id,
+				templateId: tid,
+				version,
+				role: declared.get(tid) === "applied" ? "applied" : "cited",
+			});
 		}
 		for (const [tid] of declared) {
 			if (injected.has(tid)) continue;

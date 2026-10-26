@@ -28,7 +28,12 @@ const SEED = [
 export function parseBugs(value) {
 	if (value === undefined || value === "") return new Set(["B1", "B2", "B3"]);
 	if (value.trim().toLowerCase() === "none") return new Set();
-	return new Set(value.split(",").map((s) => s.trim().toUpperCase()).filter(Boolean));
+	return new Set(
+		value
+			.split(",")
+			.map((s) => s.trim().toUpperCase())
+			.filter(Boolean),
+	);
 }
 
 export function createCanary(options = {}) {
@@ -141,7 +146,8 @@ export function createCanary(options = {}) {
 		const name = body?.name;
 		if (typeof name !== "string" || !name.trim()) return [400, { error: "name required" }];
 		// B3: names with emoji crash the "slug" step.
-		if (bugs.has("B3") && /\p{Extended_Pictographic}/u.test(name)) throw new Error("slugify: unexpected surrogate pair");
+		if (bugs.has("B3") && /\p{Extended_Pictographic}/u.test(name))
+			throw new Error("slugify: unexpected surrogate pair");
 		const id = `p${products.size + 1}`;
 		const p = { id, name, price: Number(body.price ?? 0), stock: Number(body.stock ?? 0) };
 		products.set(id, p);
@@ -153,7 +159,8 @@ export function createCanary(options = {}) {
 		const parts = url.pathname.split("/").filter(Boolean);
 		const m = req.method;
 		if (m === "GET" && url.pathname === "/health") return [200, { ok: true }];
-		if (m === "GET" && url.pathname === "/openapi.json") return [200, JSON.parse(readFileSync(join(HERE, "openapi.json"), "utf8"))];
+		if (m === "GET" && url.pathname === "/openapi.json")
+			return [200, JSON.parse(readFileSync(join(HERE, "openapi.json"), "utf8"))];
 		if (m === "POST" && url.pathname === "/reset") {
 			reset(body ?? {});
 			return [200, { ok: true }];
@@ -224,6 +231,8 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
 	const server = createCanary();
 	server.listen(port, "127.0.0.1", () => {
 		const bugs = [...parseBugs(process.env.BUGS)].join(",") || "none";
-		console.log(`canary listening on http://localhost:${port} (bugs: ${bugs}, consistency: ${process.env.CONSISTENCY ?? "sync"})`);
+		console.log(
+			`canary listening on http://localhost:${port} (bugs: ${bugs}, consistency: ${process.env.CONSISTENCY ?? "sync"})`,
+		);
 	});
 }

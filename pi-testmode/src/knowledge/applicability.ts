@@ -109,10 +109,22 @@ export function judge(app: Applicability, fp: Fingerprint): Judgement {
 				// The exception may apply: the deciding facets must be probed before relying on the template.
 				for (const p of ex.when) if (evalPredicate(p, fp) === "unknown") noteUnknown(p);
 				if (result === "true") result = "unknown";
-				reasons.push(`exception ${ex.id} undecided (${ex.when.filter((p) => evalPredicate(p, fp) === "unknown").map((p) => p.facet).join(", ")} unknown)`);
+				reasons.push(
+					`exception ${ex.id} undecided (${ex.when
+						.filter((p) => evalPredicate(p, fp) === "unknown")
+						.map((p) => p.facet)
+						.join(", ")} unknown)`,
+				);
 				break;
 			}
 		}
 	}
-	return { result, exception: fired, probes: [...probes].map(([facet, probe]) => ({ facet, probe })), unknown: [...unknown], score, reasons };
+	return {
+		result,
+		exception: fired,
+		probes: [...probes].map(([facet, probe]) => ({ facet, probe })),
+		unknown: [...unknown],
+		score,
+		reasons,
+	};
 }

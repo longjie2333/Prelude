@@ -24,7 +24,10 @@ beforeEach(async () => {
 	p = tempProject();
 	canary = await startCanary({ bugs: new Set() });
 	mkdirSync(p.paths.dir, { recursive: true });
-	writeFileSync(p.paths.scopeFile, JSON.stringify({ targets: [{ host: `localhost:${canary.port}`, allowed: ["functional"] }] }));
+	writeFileSync(
+		p.paths.scopeFile,
+		JSON.stringify({ targets: [{ host: `localhost:${canary.port}`, allowed: ["functional"] }] }),
+	);
 });
 
 afterEach(async () => {
@@ -52,7 +55,13 @@ describe("crash recovery", () => {
 		})) as string;
 
 		// Kill once the slow calls are mid-execution and the fast side effects landed.
-		await waitFor(() => getJournal(p.store, missionId, "hang") && getJournal(p.store, missionId, "tr1") && getJournal(p.store, missionId, "post2")?.status === "finished", 30_000);
+		await waitFor(
+			() =>
+				getJournal(p.store, missionId, "hang") &&
+				getJournal(p.store, missionId, "tr1") &&
+				getJournal(p.store, missionId, "post2")?.status === "finished",
+			30_000,
+		);
 		await waitFor(async () => (await orderCount()) >= 3, 10_000);
 		const exited = new Promise((r) => child?.once("exit", r));
 		child.kill("SIGKILL");
@@ -70,12 +79,24 @@ describe("crash recovery", () => {
 				(ctx) => {
 					resumedCtx = ctx;
 					return fauxAssistantMessage(
-						fauxToolCall("mission_submit", { status: "partial", summary: "resumed after crash", claims: [{ id: "o1", type: "observation", statement: "orders placed" }] }),
+						fauxToolCall("mission_submit", {
+							status: "partial",
+							summary: "resumed after crash",
+							claims: [{ id: "o1", type: "observation", statement: "orders placed" }],
+						}),
 					);
 				},
 			],
 		});
-		const o = new Orchestrator({ paths: p.paths, agentDir: p.agentDir, store: p.store, modelRuntime: router.runtime, noSandbox: true, notifyDebounceMs: 20, missionSettings: { retry: { enabled: false } } });
+		const o = new Orchestrator({
+			paths: p.paths,
+			agentDir: p.agentDir,
+			store: p.store,
+			modelRuntime: router.runtime,
+			noSandbox: true,
+			notifyDebounceMs: 20,
+			missionSettings: { retry: { enabled: false } },
+		});
 		const marked = o.recoverOnStartup();
 		expect(marked.map((m) => [m.id, m.status, m.interruptReason])).toEqual([[missionId, "interrupted", "crash"]]);
 		expect(o.parkedMissions().map((m) => m.id)).toEqual([missionId]);
@@ -112,22 +133,44 @@ describe("crash recovery", () => {
 		expect(o.flushNotifications()).toBe(0);
 
 		const events = listAudit(p.store).map((a) => a.event);
-		expect(events).toEqual(expect.arrayContaining(["mission_interrupted", "mission_blocked", "mission_resume", "mission_end", "wake"]));
+		expect(events).toEqual(
+			expect.arrayContaining(["mission_interrupted", "mission_blocked", "mission_resume", "mission_end", "wake"]),
+		);
 		expect(getMission(p.store, missionId)?.resumeCount).toBe(1);
 		await o.shutdown();
 	});
 
 	it("re-runs a mission that crashed before its session was persisted", async () => {
 		const router = createRouter(p.agentDir, {
-			executor: [() => fauxAssistantMessage(fauxToolCall("mission_submit", { status: "completed", summary: "ok", claims: [] }))],
+			executor: [
+				() =>
+					fauxAssistantMessage(fauxToolCall("mission_submit", { status: "completed", summary: "ok", claims: [] })),
+			],
 		});
-		const o = new Orchestrator({ paths: p.paths, agentDir: p.agentDir, store: p.store, modelRuntime: router.runtime, noSandbox: true });
+		const o = new Orchestrator({
+			paths: p.paths,
+			agentDir: p.agentDir,
+			store: p.store,
+			modelRuntime: router.runtime,
+			noSandbox: true,
+		});
 		p.store.run("INSERT INTO intents (id, raw, ir_json, created_at) VALUES ('i-1', 'r', '{}', 'now')");
 		p.store.run(
 			`INSERT INTO missions (id, intent_id, role, objective, spec_json, status, risk_tier, budget_json, run_dir, owner_pid, heartbeat_at, created_at)
 			 VALUES ('m-1', 'i-1', 'executor', 'o', $spec, 'running', 'R2', $b, $run, 999999, '2000-01-01T00:00:00Z', 'now')`,
 			{
-				$spec: JSON.stringify({ missionId: "m-1", intentId: "i-1", role: "executor", objective: "o", targets: [], testKinds: [], riskTier: "R2", riskReasons: [], budget: { tokens: 1e6, wallClockMs: 60_000 }, model: { provider: "faux", id: router.model().id } }),
+				$spec: JSON.stringify({
+					missionId: "m-1",
+					intentId: "i-1",
+					role: "executor",
+					objective: "o",
+					targets: [],
+					testKinds: [],
+					riskTier: "R2",
+					riskReasons: [],
+					budget: { tokens: 1e6, wallClockMs: 60_000 },
+					model: { provider: "faux", id: router.model().id },
+				}),
 				$b: JSON.stringify({ tokens: 1e6, wallClockMs: 60_000 }),
 				$run: join(p.paths.runsDir, "m-1"),
 			},
@@ -140,13 +183,27 @@ describe("crash recovery", () => {
 
 	it("leaves missions of another live process alone and gives up after two resumes", async () => {
 		const router = createRouter(p.agentDir, {});
-		const o = new Orchestrator({ paths: p.paths, agentDir: p.agentDir, store: p.store, modelRuntime: router.runtime, noSandbox: true });
+		const o = new Orchestrator({
+			paths: p.paths,
+			agentDir: p.agentDir,
+			store: p.store,
+			modelRuntime: router.runtime,
+			noSandbox: true,
+		});
 		p.store.run("INSERT INTO intents (id, raw, ir_json, created_at) VALUES ('i-1', 'r', '{}', 'now')");
 		const insert = (id: string, status: string, pid: number | null, heartbeat: string, resumes = 0) =>
 			p.store.run(
 				`INSERT INTO missions (id, intent_id, role, objective, spec_json, status, risk_tier, budget_json, run_dir, owner_pid, heartbeat_at, resume_count, session_path, created_at)
 				 VALUES ($id, 'i-1', 'executor', 'o', '{}', $st, 'R2', '{}', $run, $pid, $hb, $rc, $sp, 'now')`,
-				{ $id: id, $st: status, $run: join(p.paths.runsDir, id), $pid: pid, $hb: heartbeat, $rc: resumes, $sp: join(p.root, "missing.jsonl") },
+				{
+					$id: id,
+					$st: status,
+					$run: join(p.paths.runsDir, id),
+					$pid: pid,
+					$hb: heartbeat,
+					$rc: resumes,
+					$sp: join(p.root, "missing.jsonl"),
+				},
 			);
 		// The test runner's parent process stands in for "another live pi process".
 		insert("m-live", "running", process.ppid, new Date().toISOString());

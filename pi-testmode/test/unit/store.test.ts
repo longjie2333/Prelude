@@ -3,7 +3,15 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { putEvidence, readEvidence, sweepOrphanEvidence } from "../../src/harness/evidence.ts";
 import { openStore } from "../../src/store/db.ts";
-import { audit, insertIntent, insertMission, journalFinish, journalStart, getJournal, listAudit } from "../../src/store/repos.ts";
+import {
+	audit,
+	insertIntent,
+	insertMission,
+	journalFinish,
+	journalStart,
+	getJournal,
+	listAudit,
+} from "../../src/store/repos.ts";
 import { sha256 } from "../../src/util.ts";
 import { type TempProject, tempProject } from "../helpers.ts";
 
@@ -17,7 +25,9 @@ describe("migrations", () => {
 	it("records schema versions and attaches the global layer", () => {
 		expect(p.store.schemaVersion()).toBe(3);
 		expect(p.store.schemaVersion("g")).toBe(2);
-		expect(p.store.get<{ value: string }>("SELECT value FROM g.layer_info WHERE key = 'layer'")?.value).toBe("global");
+		expect(p.store.get<{ value: string }>("SELECT value FROM g.layer_info WHERE key = 'layer'")?.value).toBe(
+			"global",
+		);
 		expect(p.store.get<{ journal_mode: string }>("PRAGMA journal_mode")?.journal_mode).toBe("wal");
 	});
 
@@ -58,11 +68,33 @@ describe("tool journal", () => {
 		insertIntent(p.store, "i-1", "raw", {});
 		insertMission(
 			p.store,
-			{ missionId: "m-1", intentId: "i-1", role: "executor", objective: "o", targets: [], testKinds: [], riskTier: "R2", riskReasons: [], budget: { tokens: 1, wallClockMs: 1 } },
+			{
+				missionId: "m-1",
+				intentId: "i-1",
+				role: "executor",
+				objective: "o",
+				targets: [],
+				testKinds: [],
+				riskTier: "R2",
+				riskReasons: [],
+				budget: { tokens: 1, wallClockMs: 1 },
+			},
 			join(p.paths.runsDir, "m-1"),
 		);
-		journalStart(p.store, { missionId: "m-1", toolCallId: "c1", tool: "bash", inputDigest: "d", effectClass: "side_effecting" });
-		journalStart(p.store, { missionId: "m-1", toolCallId: "c1", tool: "bash", inputDigest: "d", effectClass: "side_effecting" });
+		journalStart(p.store, {
+			missionId: "m-1",
+			toolCallId: "c1",
+			tool: "bash",
+			inputDigest: "d",
+			effectClass: "side_effecting",
+		});
+		journalStart(p.store, {
+			missionId: "m-1",
+			toolCallId: "c1",
+			tool: "bash",
+			inputDigest: "d",
+			effectClass: "side_effecting",
+		});
 		expect(getJournal(p.store, "m-1", "c1")?.status).toBe("started");
 		journalFinish(p.store, { missionId: "m-1", toolCallId: "c1", isError: false, resultDigest: "r", resultRef: "r" });
 		expect(getJournal(p.store, "m-1", "c1")).toMatchObject({ status: "finished", isError: false, resultRef: "r" });

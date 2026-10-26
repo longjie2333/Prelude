@@ -20,8 +20,18 @@ export function createDeltaProposeTool(host: MissionToolHost): ToolDefinition {
 		promptSnippet: "Propose a structured template delta for the hypothesis; the gate decides",
 		parameters: Type.Object({
 			delta_id: Type.String(),
-			action: Type.Optional(StringEnum(["exclude", "patch", "redirect", "require_probe"] as const, { description: "except: what happens under the condition" })),
-			patch: Type.Optional(Type.Object({ slot: Type.String(), use: Type.String({ description: "tpl://… of the replacement slot template" }), note: Type.Optional(Type.String()) })),
+			action: Type.Optional(
+				StringEnum(["exclude", "patch", "redirect", "require_probe"] as const, {
+					description: "except: what happens under the condition",
+				}),
+			),
+			patch: Type.Optional(
+				Type.Object({
+					slot: Type.String(),
+					use: Type.String({ description: "tpl://… of the replacement slot template" }),
+					note: Type.Optional(Type.String()),
+				}),
+			),
 			redirect: Type.Optional(Type.String()),
 			probe: Type.Optional(Type.String()),
 			revise: Type.Optional(Type.Object({ path: StringEnum(REVISABLE_PATHS), value: Type.Unknown() })),
@@ -30,10 +40,12 @@ export function createDeltaProposeTool(host: MissionToolHost): ToolDefinition {
 		executionMode: "sequential",
 		async execute(_id, params) {
 			const task = host.spec.deltaTask;
-			if (!task || task.deltaId !== params.delta_id) throw new Error("delta_propose only accepts the delta assigned to this mission");
+			if (!task || task.deltaId !== params.delta_id)
+				throw new Error("delta_propose only accepts the delta assigned to this mission");
 			const d = listDeltas(host.store).find((x) => x.id === params.delta_id);
 			if (!d) throw new Error(`unknown delta ${params.delta_id}`);
-			if (d.status === "committed" || d.status === "rejected") throw new Error(`delta ${d.id} is already ${d.status}`);
+			if (d.status === "committed" || d.status === "rejected")
+				throw new Error(`delta ${d.id} is already ${d.status}`);
 			let payload: Record<string, unknown>;
 			if (d.op === "except") {
 				const base = (d.payload as { exception: Record<string, unknown> }).exception;
@@ -57,7 +69,15 @@ export function createDeltaProposeTool(host: MissionToolHost): ToolDefinition {
 			} else {
 				throw new Error(`delta_propose does not handle ${d.op}`);
 			}
-			const r = proposeDelta(host.store, { op: d.op, target: d.target, payload, evidence: d.evidence, proposedBy: `mission:${host.missionId}`, deltaId: d.id, hypothesisKey: d.hypothesisKey ?? undefined });
+			const r = proposeDelta(host.store, {
+				op: d.op,
+				target: d.target,
+				payload,
+				evidence: d.evidence,
+				proposedBy: `mission:${host.missionId}`,
+				deltaId: d.id,
+				hypothesisKey: d.hypothesisKey ?? undefined,
+			});
 			const failed = r.report.checks.filter((c) => !c.ok);
 			const lines = [
 				`gate: ${r.report.decision}${r.version ? ` → ${d.target}@${r.version}` : ""}`,
@@ -65,7 +85,11 @@ export function createDeltaProposeTool(host: MissionToolHost): ToolDefinition {
 				`cornerstone replay: ${r.report.replay.filter((x) => x.ok).length}/${r.report.replay.length} unchanged`,
 				`evidence: ${r.report.evidence.have}/${r.report.evidence.need}`,
 			];
-			return textResult(lines.join("\n"), { decision: r.report.decision, version: r.version }, { isError: r.report.decision === "rejected" });
+			return textResult(
+				lines.join("\n"),
+				{ decision: r.report.decision, version: r.version },
+				{ isError: r.report.decision === "rejected" },
+			);
 		},
 	});
 }

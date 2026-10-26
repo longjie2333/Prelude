@@ -73,7 +73,8 @@ export function validateSkill(dir: string): SkillReport {
 	const warnings: string[] = [];
 	const manifest = { hosts: [] as string[], writes: [] as string[], exec: false, files: 0, bytes: 0 };
 	const skillFile = join(dir, "SKILL.md");
-	if (!existsSync(dir) || !statSync(dir).isDirectory()) return { ok: false, errors: [`${dir} is not a directory`], warnings, manifest };
+	if (!existsSync(dir) || !statSync(dir).isDirectory())
+		return { ok: false, errors: [`${dir} is not a directory`], warnings, manifest };
 	if (!existsSync(skillFile)) return { ok: false, errors: ["SKILL.md is missing"], warnings, manifest };
 
 	const fm = parseFrontmatter(readFileSync(skillFile, "utf8"));
@@ -81,10 +82,12 @@ export function validateSkill(dir: string): SkillReport {
 	const name = fm?.name;
 	const description = fm?.description;
 	if (!name) errors.push("frontmatter name is missing");
-	else if (!NAME.test(name) || name.length > 64) errors.push(`name "${name}" must be lowercase letters, digits, and single hyphens (≤64 chars)`);
+	else if (!NAME.test(name) || name.length > 64)
+		errors.push(`name "${name}" must be lowercase letters, digits, and single hyphens (≤64 chars)`);
 	if (!description) errors.push("frontmatter description is missing");
 	else if (description.length > 1024) errors.push("description exceeds 1024 characters");
-	if (fm?.["allowed-tools"]) warnings.push("allowed-tools is ignored: tool authorization comes from the mission, not the skill (§11.2)");
+	if (fm?.["allowed-tools"])
+		warnings.push("allowed-tools is ignored: tool authorization comes from the mission, not the skill (§11.2)");
 
 	const hosts = new Set<string>();
 	const writes = new Set<string>();
@@ -101,10 +104,16 @@ export function validateSkill(dir: string): SkillReport {
 		const text = buf.toString("utf8");
 		const invisible = countInvisible(text);
 		if (invisible) errors.push(`${rel} contains ${invisible} invisible/bidi control character(s); remove them`);
-		for (const re of INJECTION) if (re.test(text)) errors.push(`${rel} contains instruction-like text aimed at the agent (${re.source.slice(0, 40)}…)`);
+		for (const re of INJECTION)
+			if (re.test(text))
+				errors.push(`${rel} contains instruction-like text aimed at the agent (${re.source.slice(0, 40)}…)`);
 		for (const m of text.matchAll(/\bhttps?:\/\/([a-z0-9.-]+(?::\d+)?)/gi)) hosts.add(m[1].toLowerCase());
-		for (const m of text.matchAll(/\b(?:writeFile(?:Sync)?|appendFile(?:Sync)?|createWriteStream)\(\s*["'`]([^"'`]+)/g)) writes.add(m[1]);
-		if (/\b(child_process|execSync|spawnSync|execFile|spawn\(|exec\(|subprocess|os\.system)\b/.test(text)) manifest.exec = true;
+		for (const m of text.matchAll(
+			/\b(?:writeFile(?:Sync)?|appendFile(?:Sync)?|createWriteStream)\(\s*["'`]([^"'`]+)/g,
+		))
+			writes.add(m[1]);
+		if (/\b(child_process|execSync|spawnSync|execFile|spawn\(|exec\(|subprocess|os\.system)\b/.test(text))
+			manifest.exec = true;
 	}
 	if (manifest.files > MAX_FILES) errors.push(`too many files (${manifest.files} > ${MAX_FILES})`);
 	if (manifest.bytes > MAX_BYTES) errors.push(`too large (${manifest.bytes} bytes > ${MAX_BYTES})`);

@@ -30,14 +30,26 @@ describe("scope", () => {
 
 describe("mission risk", () => {
 	it("is computed, never declared", () => {
-		expect(assessMissionRisk({ role: "scout", targets: ["http://localhost:4100"], testKinds: ["functional"], scope }).tier).toBe("R1");
-		expect(assessMissionRisk({ role: "executor", targets: ["http://localhost:4100"], testKinds: ["functional"], scope }).tier).toBe("R3");
+		expect(
+			assessMissionRisk({ role: "scout", targets: ["http://localhost:4100"], testKinds: ["functional"], scope })
+				.tier,
+		).toBe("R1");
+		expect(
+			assessMissionRisk({ role: "executor", targets: ["http://localhost:4100"], testKinds: ["functional"], scope })
+				.tier,
+		).toBe("R3");
 		expect(assessMissionRisk({ role: "executor", targets: [], testKinds: [], scope }).tier).toBe("R2");
 	});
 
 	it("raises to R4 for production, destructive, out-of-scope, or unauthorized operations", () => {
 		const r4 = (x: Partial<Parameters<typeof assessMissionRisk>[0]>) =>
-			assessMissionRisk({ role: "executor", targets: ["http://localhost:4100"], testKinds: ["functional"], scope, ...x });
+			assessMissionRisk({
+				role: "executor",
+				targets: ["http://localhost:4100"],
+				testKinds: ["functional"],
+				scope,
+				...x,
+			});
 		expect(r4({ targets: ["https://shop.example/"] })).toMatchObject({ tier: "R4", requiresApproval: true });
 		expect(r4({ environment: "production" }).tier).toBe("R4");
 		expect(r4({ testKinds: ["destructive"] }).tier).toBe("R4");
@@ -46,11 +58,17 @@ describe("mission risk", () => {
 	});
 
 	it("honours template floors", () => {
-		expect(assessMissionRisk({ role: "scout", targets: [], testKinds: [], templateFloor: "R2", scope }).tier).toBe("R2");
+		expect(assessMissionRisk({ role: "scout", targets: [], testKinds: [], templateFloor: "R2", scope }).tier).toBe(
+			"R2",
+		);
 	});
 
 	it("without a scope only R0/R1 run", () => {
-		expect(assessMissionRisk({ role: "scout", targets: ["http://localhost:4100"], testKinds: ["functional"] })).toMatchObject({ tier: "R1", allowed: true });
-		expect(assessMissionRisk({ role: "executor", targets: ["http://localhost:4100"], testKinds: ["functional"] })).toMatchObject({ allowed: false });
+		expect(
+			assessMissionRisk({ role: "scout", targets: ["http://localhost:4100"], testKinds: ["functional"] }),
+		).toMatchObject({ tier: "R1", allowed: true });
+		expect(
+			assessMissionRisk({ role: "executor", targets: ["http://localhost:4100"], testKinds: ["functional"] }),
+		).toMatchObject({ allowed: false });
 	});
 });

@@ -6,7 +6,14 @@
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { edges, listFacets, listProviders, listTemplates, listTemplateUses, type TemplateRecord } from "../knowledge/store.ts";
+import {
+	edges,
+	listFacets,
+	listProviders,
+	listTemplates,
+	listTemplateUses,
+	type TemplateRecord,
+} from "../knowledge/store.ts";
 import type { TestmodePaths } from "../paths.ts";
 import type { Store } from "../store/db.ts";
 import { audit } from "../store/repos.ts";
@@ -33,12 +40,18 @@ function jaccard(a: Set<string>, b: Set<string>): number {
 }
 
 export function similarity(a: TemplateRecord, b: TemplateRecord): number {
-	const text = (t: TemplateRecord) => trigrams([t.spec.card.title, t.spec.card.summary, ...t.spec.intent_patterns].join(" "));
-	const facets = (t: TemplateRecord) => new Set(t.spec.applicability.hard.map((h) => `${h.facet}:${h.op}:${h.value ?? h.values?.join("|")}`));
+	const text = (t: TemplateRecord) =>
+		trigrams([t.spec.card.title, t.spec.card.summary, ...t.spec.intent_patterns].join(" "));
+	const facets = (t: TemplateRecord) =>
+		new Set(t.spec.applicability.hard.map((h) => `${h.facet}:${h.op}:${h.value ?? h.values?.join("|")}`));
 	const structure =
 		(a.type === b.type ? 0.4 : 0) +
 		0.4 * jaccard(facets(a), facets(b)) +
-		(a.spec.slots.oracle?.ref && a.spec.slots.oracle.ref === b.spec.slots.oracle?.ref ? 0.2 : a.spec.slots.oracle?.text === b.spec.slots.oracle?.text ? 0.2 : 0);
+		(a.spec.slots.oracle?.ref && a.spec.slots.oracle.ref === b.spec.slots.oracle?.ref
+			? 0.2
+			: a.spec.slots.oracle?.text === b.spec.slots.oracle?.text
+				? 0.2
+				: 0);
 	return 0.5 * jaccard(text(a), text(b)) + 0.5 * structure;
 }
 
@@ -58,12 +71,31 @@ export function garden(s: Store, paths: TestmodePaths, opts: { apply?: boolean }
 		for (let j = i + 1; j < live.length; j++) {
 			const sim = similarity(live[i], live[j]);
 			if (sim < DUPLICATE_THRESHOLD) continue;
-			const [keep, drop] = templateLowerBound(s, live[i].id) >= templateLowerBound(s, live[j].id) ? [live[i], live[j]] : [live[j], live[i]];
-			const entry: GardenReport["duplicates"][number] = { keep: keep.id, deprecate: drop.id, similarity: Math.round(sim * 100) / 100 };
+			const [keep, drop] =
+				templateLowerBound(s, live[i].id) >= templateLowerBound(s, live[j].id)
+					? [live[i], live[j]]
+					: [live[j], live[i]];
+			const entry: GardenReport["duplicates"][number] = {
+				keep: keep.id,
+				deprecate: drop.id,
+				similarity: Math.round(sim * 100) / 100,
+			};
 			if (opts.apply) {
 				// Evidence: the episodes that used the weaker template (a rarely used duplicate stays suspended).
-				const used = [...new Set(listTemplateUses(s, { templateId: drop.id }).filter((u) => u.role !== "retrieved_unused").map((u) => u.episodeId))];
-				const r = proposeDelta(s, { op: "deprecate", target: drop.id, payload: { reason: `near-duplicate of ${keep.id} (${entry.similarity})`, replaced_by: keep.id }, evidence: used, proposedBy: "gardener" });
+				const used = [
+					...new Set(
+						listTemplateUses(s, { templateId: drop.id })
+							.filter((u) => u.role !== "retrieved_unused")
+							.map((u) => u.episodeId),
+					),
+				];
+				const r = proposeDelta(s, {
+					op: "deprecate",
+					target: drop.id,
+					payload: { reason: `near-duplicate of ${keep.id} (${entry.similarity})`, replaced_by: keep.id },
+					evidence: used,
+					proposedBy: "gardener",
+				});
 				entry.decision = r.report.decision;
 			}
 			report.duplicates.push(entry);
@@ -73,16 +105,29 @@ export function garden(s: Store, paths: TestmodePaths, opts: { apply?: boolean }
 	for (const t of live) {
 		const byFacet = new Map<string, string[]>();
 		for (const ex of t.spec.applicability.exceptions) {
-			if (ex.action !== "exclude" || ex.when.length !== 1 || ex.when[0].op !== "eq" || ex.source === "policy") continue;
+			if (ex.action !== "exclude" || ex.when.length !== 1 || ex.when[0].op !== "eq" || ex.source === "policy")
+				continue;
 			byFacet.set(ex.when[0].facet, [...(byFacet.get(ex.when[0].facet) ?? []), ex.id]);
 		}
 		for (const [facet, ids] of byFacet) {
 			if (ids.length < FOLD_MIN) continue;
-			const values = t.spec.applicability.exceptions.filter((e) => ids.includes(e.id)).map((e) => e.when[0].value as string);
+			const values = t.spec.applicability.exceptions
+				.filter((e) => ids.includes(e.id))
+				.map((e) => e.when[0].value as string);
 			const entry: GardenReport["folds"][number] = { template: t.id, facet, exceptions: ids };
 			if (opts.apply) {
-				const support = ids.flatMap((id) => listDeltas(s, { target: t.id, status: "committed" }).filter((d) => (d.payload as { exception?: { id: string } }).exception?.id === id).flatMap((d) => d.evidence));
-				const r = proposeDelta(s, { op: "narrow", target: t.id, payload: { facet, exception_ids: ids, hard: { facet, op: "not_in", values } }, evidence: [...new Set(support)], proposedBy: "gardener" });
+				const support = ids.flatMap((id) =>
+					listDeltas(s, { target: t.id, status: "committed" })
+						.filter((d) => (d.payload as { exception?: { id: string } }).exception?.id === id)
+						.flatMap((d) => d.evidence),
+				);
+				const r = proposeDelta(s, {
+					op: "narrow",
+					target: t.id,
+					payload: { facet, exception_ids: ids, hard: { facet, op: "not_in", values } },
+					evidence: [...new Set(support)],
+					proposedBy: "gardener",
+				});
 				entry.decision = r.report.decision;
 			}
 			report.folds.push(entry);
@@ -94,15 +139,18 @@ export function garden(s: Store, paths: TestmodePaths, opts: { apply?: boolean }
 		for (const t of live.filter((x) => x.layer === layer)) byType.set(t.type, [...(byType.get(t.type) ?? []), t]);
 		for (const [type, ts] of byType) {
 			if (ts.length <= CAPACITY[layer]) continue;
-			const weakest = [...ts].sort((a, b) => templateLowerBound(s, a.id) - templateLowerBound(s, b.id)).slice(0, ts.length - CAPACITY[layer]);
+			const weakest = [...ts]
+				.sort((a, b) => templateLowerBound(s, a.id) - templateLowerBound(s, b.id))
+				.slice(0, ts.length - CAPACITY[layer]);
 			report.overCapacity.push({ layer, type, count: ts.length, candidates: weakest.map((t) => t.id) });
 		}
 	}
 
-	if (opts.apply) for (const t of live) {
-		const tr = applyLifecycle(s, t.id);
-		if (tr) report.transitions.push(`${t.id}: ${tr.from} → ${tr.to} (${tr.reason})`);
-	}
+	if (opts.apply)
+		for (const t of live) {
+			const tr = applyLifecycle(s, t.id);
+			if (tr) report.transitions.push(`${t.id}: ${tr.from} → ${tr.to} (${tr.reason})`);
+		}
 	report.snapshot = snapshot(s, paths);
 	return report;
 }
@@ -118,10 +166,22 @@ export function snapshot(s: Store, paths: TestmodePaths): string {
 		id,
 		ts: nowIso(),
 		templates: templates.map((t) => ({ id: t.id, version: t.version, status: t.status, spec: t.spec, body: t.body })),
-		edges: [...new Map(templates.flatMap((t) => [...edges(s, { src: t.id }), ...edges(s, { dst: t.id })]).map((e) => [`${e.src}|${e.kind}|${e.dst}`, e])).values()],
+		edges: [
+			...new Map(
+				templates
+					.flatMap((t) => [...edges(s, { src: t.id }), ...edges(s, { dst: t.id })])
+					.map((e) => [`${e.src}|${e.kind}|${e.dst}`, e]),
+			).values(),
+		],
 		facets: listFacets(s),
 		stats: templates.flatMap((t) => getStats(s, t.id)),
-		providers: listProviders(s).map((p) => ({ sha256: p.sha256, capId: p.capId, kind: p.kind, name: p.name, trust: p.trust })),
+		providers: listProviders(s).map((p) => ({
+			sha256: p.sha256,
+			capId: p.capId,
+			kind: p.kind,
+			name: p.name,
+			trust: p.trust,
+		})),
 	};
 	writeFileSync(path, JSON.stringify(data, null, 1));
 	s.tx(() => {

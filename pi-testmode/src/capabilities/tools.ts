@@ -13,7 +13,10 @@ import { mcpProviderHash, serverName, toolDefsHash } from "./mcp-bind.ts";
 import { hashDirectory } from "./registry.ts";
 import { validateSkill } from "./skill-validate.ts";
 
-const CAP = Type.String({ pattern: "^cap:[a-z0-9.-]+$", description: "Hierarchical capability id, e.g. cap:load.generate.http" });
+const CAP = Type.String({
+	pattern: "^cap:[a-z0-9.-]+$",
+	description: "Hierarchical capability id, e.g. cap:load.generate.http",
+});
 
 export function createCapabilityRequestTool(host: MissionToolHost): ToolDefinition {
 	return defineTool({
@@ -22,18 +25,29 @@ export function createCapabilityRequestTool(host: MissionToolHost): ToolDefiniti
 		description:
 			"Report a missing capability (agent-core §9.5). A Toolsmith mission acquires and verifies it in the background; this mission does not wait. The request is recorded as a deviation.",
 		promptSnippet: "Report a missing capability; a Toolsmith acquires it in the background",
-		promptGuidelines: ["Use capability_request when the task needs a reusable tool or skill you do not have; then finish with what you can do now."],
+		promptGuidelines: [
+			"Use capability_request when the task needs a reusable tool or skill you do not have; then finish with what you can do now.",
+		],
 		parameters: Type.Object({
 			cap: CAP,
 			semantics: Type.String({ description: "What the capability does, precisely" }),
 			io: Type.Optional(Type.Object({ input: Type.String(), output: Type.String() })),
-			acceptance_hints: Type.Optional(Type.Array(Type.String(), { description: "Checks with known answers, e.g. 'reading a product with stock 10 returns 10'" })),
+			acceptance_hints: Type.Optional(
+				Type.Array(Type.String(), {
+					description: "Checks with known answers, e.g. 'reading a product with stock 10 returns 10'",
+				}),
+			),
 			priority: Type.Optional(StringEnum(["blocking", "nice_to_have"] as const)),
 		}),
 		executionMode: "sequential",
 		async execute(_id, params) {
 			if (!host.requestCapability) throw new Error("capability requests are not available in this mission");
-			const r = host.requestCapability({ capId: params.cap, semantics: params.semantics, io: params.io, acceptanceHints: params.acceptance_hints });
+			const r = host.requestCapability({
+				capId: params.cap,
+				semantics: params.semantics,
+				io: params.io,
+				acceptanceHints: params.acceptance_hints,
+			});
 			return textResult(r.message, r);
 		},
 	});
@@ -51,9 +65,12 @@ export function createSkillValidateTool(host: MissionToolHost): ToolDefinition {
 	return defineTool({
 		name: "skill_validate",
 		label: "Validate Skill",
-		description: "Statically review a Skill directory in quarantine: frontmatter, invisible characters, instruction-like text, permission manifest. Nothing is executed.",
+		description:
+			"Statically review a Skill directory in quarantine: frontmatter, invisible characters, instruction-like text, permission manifest. Nothing is executed.",
 		promptSnippet: "Statically review a Skill directory in quarantine",
-		parameters: Type.Object({ path: Type.String({ description: "Skill directory, relative to your run directory (inside quarantine/)" }) }),
+		parameters: Type.Object({
+			path: Type.String({ description: "Skill directory, relative to your run directory (inside quarantine/)" }),
+		}),
 		async execute(_id, params) {
 			const report = validateSkill(insideQuarantine(host, params.path));
 			const lines = [
@@ -69,15 +86,31 @@ export function createSkillValidateTool(host: MissionToolHost): ToolDefinition {
 
 async function registerMcp(
 	host: MissionToolHost,
-	params: { cap: string; semantics: string; version?: string; name?: string; mcp?: { command: string; args?: string[]; env?: Record<string, string> } },
+	params: {
+		cap: string;
+		semantics: string;
+		version?: string;
+		name?: string;
+		mcp?: { command: string; args?: string[]; env?: Record<string, string> };
+	},
 ) {
 	if (!params.mcp || !params.name) throw new Error("kind mcp needs name and mcp { command, args }");
 	if (!host.probeMcp || !host.approve) throw new Error("MCP registration is not available in this mission");
 	const server = serverName(params.name);
-	if (listProviders(host.store).some((p) => p.kind === "mcp" && p.location.server === server)) throw new Error(`an MCP provider named ${server} already exists`);
-	const config = { command: params.mcp.command, args: params.mcp.args ?? [], ...(params.mcp.env ? { env: params.mcp.env } : {}) };
+	if (listProviders(host.store).some((p) => p.kind === "mcp" && p.location.server === server))
+		throw new Error(`an MCP provider named ${server} already exists`);
+	const config = {
+		command: params.mcp.command,
+		args: params.mcp.args ?? [],
+		...(params.mcp.env ? { env: params.mcp.env } : {}),
+	};
 	// Starting a server is a first use of an external dependency (R2).
-	const approved = await host.approve({ tier: "R2", subject: `mcp:${config.command} ${config.args.join(" ")}`, title: "Connect a new MCP server", detail: `${config.command} ${config.args.join(" ")}` });
+	const approved = await host.approve({
+		tier: "R2",
+		subject: `mcp:${config.command} ${config.args.join(" ")}`,
+		title: "Connect a new MCP server",
+		detail: `${config.command} ${config.args.join(" ")}`,
+	});
 	if (!approved) throw new Error("connecting the MCP server was not approved");
 	const tools = await host.probeMcp(server, config);
 	if (tools.length === 0) throw new Error(`MCP server ${server} exposed no tools`);
@@ -100,12 +133,20 @@ async function registerMcp(
 		});
 		addEdge(store, "project", params.cap, hash, "implemented_by", { trust: "candidate" });
 		if (gap) updateGap(store, gap.id, { providerSha: hash });
-		audit(store, { actor: `mission:${host.missionId}`, event: "provider_register", decision: "candidate", reason: `${params.cap} ← mcp ${server}@${hash.slice(0, 8)} (${tools.length} tools)` });
+		audit(store, {
+			actor: `mission:${host.missionId}`,
+			event: "provider_register",
+			decision: "candidate",
+			reason: `${params.cap} ← mcp ${server}@${hash.slice(0, 8)} (${tools.length} tools)`,
+		});
 	});
-	return textResult(`Registered MCP server ${server} (${tools.map((t) => t.name).join(", ")}) as a candidate provider of ${params.cap}; tool definitions hash-locked.`, {
-		sha256: hash,
-		server,
-	} as Record<string, string>);
+	return textResult(
+		`Registered MCP server ${server} (${tools.map((t) => t.name).join(", ")}) as a candidate provider of ${params.cap}; tool definitions hash-locked.`,
+		{
+			sha256: hash,
+			server,
+		} as Record<string, string>,
+	);
 }
 
 export function createProviderRegisterTool(host: MissionToolHost): ToolDefinition {
@@ -120,7 +161,14 @@ export function createProviderRegisterTool(host: MissionToolHost): ToolDefinitio
 			path: Type.Optional(Type.String({ description: "kind skill: Skill directory inside quarantine/" })),
 			name: Type.Optional(Type.String({ description: "kind mcp: provider name" })),
 			mcp: Type.Optional(
-				Type.Object({ command: Type.String(), args: Type.Optional(Type.Array(Type.String())), env: Type.Optional(Type.Record(Type.String(), Type.String())) }, { description: "kind mcp: stdio server" }),
+				Type.Object(
+					{
+						command: Type.String(),
+						args: Type.Optional(Type.Array(Type.String())),
+						env: Type.Optional(Type.Record(Type.String(), Type.String())),
+					},
+					{ description: "kind mcp: stdio server" },
+				),
 			),
 			cap: CAP,
 			semantics: Type.String(),
@@ -153,11 +201,21 @@ export function createProviderRegisterTool(host: MissionToolHost): ToolDefinitio
 					version: params.version ?? "0.1.0",
 					location: { path: dest },
 					trust: "candidate",
-					provenance: { mission: host.missionId, gap: gap?.id, manifest: report.manifest, warnings: report.warnings },
+					provenance: {
+						mission: host.missionId,
+						gap: gap?.id,
+						manifest: report.manifest,
+						warnings: report.warnings,
+					},
 				});
 				addEdge(store, "project", params.cap, hash, "implemented_by", { trust: "candidate" });
 				if (gap) updateGap(store, gap.id, { providerSha: hash });
-				audit(store, { actor: `mission:${host.missionId}`, event: "provider_register", decision: "candidate", reason: `${params.cap} ← ${report.name}@${hash.slice(0, 8)}` });
+				audit(store, {
+					actor: `mission:${host.missionId}`,
+					event: "provider_register",
+					decision: "candidate",
+					reason: `${params.cap} ← ${report.name}@${hash.slice(0, 8)}`,
+				});
 			});
 			return textResult(
 				`Registered ${report.name}@${hash.slice(0, 8)} as a candidate provider of ${params.cap}. An independent verifier runs its conformance check after you submit.`,

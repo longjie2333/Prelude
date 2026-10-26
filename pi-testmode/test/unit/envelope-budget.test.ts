@@ -48,7 +48,10 @@ describe("claims need test_run verdicts", () => {
 		expect(verifyClaim("defect", [run("a", "inconclusive")])).toBe("inconclusive");
 		expect(verifyClaim("pass", [run("a", "pass")])).toBe("confirmed");
 		// Race-dependent defect seen in the real-model smoke run: 7 of 10 replays fail.
-		const race = [...Array.from({ length: 7 }, (_, i) => run(`f${i}`, "fail")), ...Array.from({ length: 3 }, (_, i) => run(`p${i}`, "pass"))];
+		const race = [
+			...Array.from({ length: 7 }, (_, i) => run(`f${i}`, "fail")),
+			...Array.from({ length: 3 }, (_, i) => run(`p${i}`, "pass")),
+		];
 		expect(verifyClaim("defect", race)).toBe("confirmed");
 		expect(verifyClaim("defect", race.slice(4))).toBe("inconclusive"); // 3 fail / 3 pass
 	});
@@ -57,7 +60,11 @@ describe("claims need test_run verdicts", () => {
 describe("conformanceScore", () => {
 	it("scores the cited runs, not the verifier's fault probes", () => {
 		const runs = [run("ok1", "pass"), run("ok2", "pass"), run("probe1", "fail"), run("probe2", "fail")];
-		const env = { status: "completed", summary: "s", claims: [{ id: "k1", type: "pass", statement: "conforms", test_run_ids: ["ok1", "ok2"] }] } as never;
+		const env = {
+			status: "completed",
+			summary: "s",
+			claims: [{ id: "k1", type: "pass", statement: "conforms", test_run_ids: ["ok1", "ok2"] }],
+		} as never;
 		expect(conformanceScore(env, runs)).toEqual({ passed: 2, decided: 2, score: 1 });
 		expect(conformanceScore({ status: "completed", summary: "s", claims: [] } as never, runs).score).toBe(0.5);
 	});
@@ -69,7 +76,9 @@ describe("verdictFor", () => {
 		expect(verdictFor({ exitCode: 1, timedOut: false, aborted: false }).verdict).toBe("fail");
 		expect(verdictFor({ exitCode: 127, timedOut: false, aborted: false }).verdict).toBe("error");
 		expect(verdictFor({ exitCode: null, timedOut: true, aborted: false }).verdict).toBe("inconclusive");
-		expect(verdictFor({ exitCode: null, timedOut: false, aborted: false, spawnError: "ENOENT" }).verdict).toBe("error");
+		expect(verdictFor({ exitCode: null, timedOut: false, aborted: false, spawnError: "ENOENT" }).verdict).toBe(
+			"error",
+		);
 	});
 });
 
@@ -106,12 +115,29 @@ describe("budget (new tokens, I-28)", () => {
 	});
 
 	it("carries spent cost and the context base across a resume (and reads pre-I-28 rows)", () => {
-		const b = new BudgetTracker({ tokens: 1000, wallClockMs: 60_000 }, { tokens: 900, processed: 5000, input: 4000, output: 1000, costUsd: 0, wallClockMs: 1000, turns: 3, context: 2000 }, 10_000);
+		const b = new BudgetTracker(
+			{ tokens: 1000, wallClockMs: 60_000 },
+			{
+				tokens: 900,
+				processed: 5000,
+				input: 4000,
+				output: 1000,
+				costUsd: 0,
+				wallClockMs: 1000,
+				turns: 3,
+				context: 2000,
+			},
+			10_000,
+		);
 		expect(b.state(10_000)).toBe("warn");
 		expect(b.snapshot(10_000).wallClockMs).toBe(1000);
 		b.addUsage({ input: 2050, output: 0 });
 		expect(b.snapshot(10_000).tokens).toBe(950);
-		const legacy = new BudgetTracker({ tokens: 1000, wallClockMs: 60_000 }, { tokens: 10, input: 0, output: 0, costUsd: 0, wallClockMs: 0, turns: 1 } as never, 0);
+		const legacy = new BudgetTracker(
+			{ tokens: 1000, wallClockMs: 60_000 },
+			{ tokens: 10, input: 0, output: 0, costUsd: 0, wallClockMs: 0, turns: 1 } as never,
+			0,
+		);
 		expect(legacy.snapshot(0)).toMatchObject({ processed: 0, context: 0 });
 	});
 });
@@ -126,7 +152,17 @@ describe("roles", () => {
 
 	it("renders the mission spec with the kernel-computed tier", () => {
 		const text = renderMissionSpec(
-			{ missionId: "m-1", intentId: "i-1", role: "executor", objective: "o", targets: ["http://localhost:4100"], testKinds: ["functional"], riskTier: "R3", riskReasons: [], budget: { tokens: 10, wallClockMs: 60_000 } },
+			{
+				missionId: "m-1",
+				intentId: "i-1",
+				role: "executor",
+				objective: "o",
+				targets: ["http://localhost:4100"],
+				testKinds: ["functional"],
+				riskTier: "R3",
+				riskReasons: [],
+				budget: { tokens: 10, wallClockMs: 60_000 },
+			},
 			"/runs/m-1",
 		);
 		expect(text).toContain("risk_tier: R3");

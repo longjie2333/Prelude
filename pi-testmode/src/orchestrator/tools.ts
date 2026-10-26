@@ -24,7 +24,8 @@ export function createIntentRecordTool(host: MainToolHost): ToolDefinition {
 	return defineTool({
 		name: "intent_record",
 		label: "Record Intent",
-		description: "Record the parsed test intent (Intent IR). Returns the intent_id used by mission_dispatch and report_finalize.",
+		description:
+			"Record the parsed test intent (Intent IR). Returns the intent_id used by mission_dispatch and report_finalize.",
 		promptSnippet: "Record the parsed test intent (Intent IR) and get an intent_id",
 		promptGuidelines: [
 			"Use intent_record once per user test request, before mission_dispatch. Put defaults you chose into assumptions; they appear in the report.",
@@ -52,20 +53,36 @@ const DispatchParams = Type.Object({
 	missions: Type.Array(
 		Type.Object({
 			role: StringEnum(["scout", "executor"] as const, {
-				description: "scout = read-only reconnaissance; executor = run tests. Verifiers are dispatched automatically.",
+				description:
+					"scout = read-only reconnaissance; executor = run tests. Verifiers are dispatched automatically.",
 			}),
 			objective: Type.String({ description: "One concrete objective" }),
-			targets: Type.Array(Type.String(), { description: "Hosts or URLs the mission may touch, e.g. http://localhost:4100" }),
-			test_kinds: Type.Array(StringEnum(TEST_KINDS), { description: "Operations needed: functional, load, security-check, destructive" }),
-			context: Type.Optional(Type.String({ description: "What the mission needs to know: SUT docs, reset endpoint, hypotheses" })),
+			targets: Type.Array(Type.String(), {
+				description: "Hosts or URLs the mission may touch, e.g. http://localhost:4100",
+			}),
+			test_kinds: Type.Array(StringEnum(TEST_KINDS), {
+				description: "Operations needed: functional, load, security-check, destructive",
+			}),
+			context: Type.Optional(
+				Type.String({ description: "What the mission needs to know: SUT docs, reset endpoint, hypotheses" }),
+			),
 			budget: Type.Optional(
 				Type.Object(
 					{ tokens: Type.Optional(Type.Number()), wall_clock_s: Type.Optional(Type.Number()) },
-					{ description: "Usually omit. Tokens are new tokens (context growth plus output, not the resent context); values below half the role default are raised to it." },
+					{
+						description:
+							"Usually omit. Tokens are new tokens (context growth plus output, not the resent context); values below half the role default are raised to it.",
+					},
 				),
 			),
-			template_ids: Type.Optional(Type.Array(Type.String(), { description: "Template ids from knowledge_search cards to activate in this mission" })),
-			capabilities: Type.Optional(Type.Array(Type.String(), { description: "Extra capability ids to bind (cap:…)" })),
+			template_ids: Type.Optional(
+				Type.Array(Type.String(), {
+					description: "Template ids from knowledge_search cards to activate in this mission",
+				}),
+			),
+			capabilities: Type.Optional(
+				Type.Array(Type.String(), { description: "Extra capability ids to bind (cap:…)" }),
+			),
 		}),
 		{ minItems: 1 },
 	),
@@ -105,7 +122,8 @@ export function createMissionDispatchTool(host: MainToolHost): ToolDefinition {
 			const lines = outcomes.map((x) =>
 				x.ok ? `dispatched ${x.missionId} (${x.role}, ${x.tier})` : `NOT dispatched "${x.objective}": ${x.reason}`,
 			);
-			if (started.length > 0) lines.push("Missions run in the background. End your turn now; you will be woken when results arrive.");
+			if (started.length > 0)
+				lines.push("Missions run in the background. End your turn now; you will be woken when results arrive.");
 			return textResult(lines.join("\n"), { outcomes }, { terminate: started.length > 0 });
 		},
 	});
@@ -149,11 +167,15 @@ export function createReportFinalizeTool(host: MainToolHost): ToolDefinition {
 		description:
 			"Write the intent's report from recorded mission results and close the intent. Verified defects, unconfirmed claims, assumptions, coverage gaps, isolation level, and cost are filled in from the record; you provide the conclusion.",
 		promptSnippet: "Write the report for an intent and close it",
-		promptGuidelines: ["Use report_finalize once the intent's missions have ended; then give the user a short summary and the report path."],
+		promptGuidelines: [
+			"Use report_finalize once the intent's missions have ended; then give the user a short summary and the report path.",
+		],
 		parameters: Type.Object({
 			intent_id: Type.String(),
 			conclusion: Type.String({ description: "Answer to the user's question, grounded in confirmed claims only" }),
-			uncovered: Type.Optional(Type.Array(Type.String(), { description: "Targets or goals you chose not to cover" })),
+			uncovered: Type.Optional(
+				Type.Array(Type.String(), { description: "Targets or goals you chose not to cover" }),
+			),
 			notes: Type.Optional(Type.String()),
 			force: Type.Optional(Type.Boolean({ description: "Finalize even though missions are still running" })),
 		}),
@@ -161,10 +183,20 @@ export function createReportFinalizeTool(host: MainToolHost): ToolDefinition {
 		defaultActive: false,
 		async execute(_id, params) {
 			const o = host.orchestrator();
-			const { report: r, curator } = o.finalizeIntent(params.intent_id, { conclusion: params.conclusion, uncovered: params.uncovered, notes: params.notes, force: params.force });
+			const { report: r, curator } = o.finalizeIntent(params.intent_id, {
+				conclusion: params.conclusion,
+				uncovered: params.uncovered,
+				notes: params.notes,
+				force: params.force,
+			});
 			return textResult(
 				`Report written: ${r.path}\nconfirmed defects: ${r.confirmedDefects}, confirmed passes: ${r.confirmedPasses}, not confirmed: ${r.unconfirmed}${curator ? `\nA curator (${curator}) distills a draft template in the background.` : ""}`,
-				{ path: r.path, confirmedDefects: r.confirmedDefects, confirmedPasses: r.confirmedPasses, unconfirmed: r.unconfirmed },
+				{
+					path: r.path,
+					confirmedDefects: r.confirmedDefects,
+					confirmedPasses: r.confirmedPasses,
+					unconfirmed: r.unconfirmed,
+				},
 			);
 		},
 	});
@@ -184,11 +216,15 @@ export function createKnowledgeSearchTool(host: MainToolHost): ToolDefinition {
 		description:
 			"Find test templates that apply to an intent. Returns at most 3 cards and a hit level: H3 exact (stable template applies), H2 adapted (applies, but probe or check first), H1 analogous (only related templates), H0 none.",
 		promptSnippet: "Find applicable test templates (≤3 cards) and the hit level for an intent",
-		promptGuidelines: ["Use knowledge_search after intent_record and before mission_dispatch; pass applicable card ids to mission_dispatch as template_ids."],
+		promptGuidelines: [
+			"Use knowledge_search after intent_record and before mission_dispatch; pass applicable card ids to mission_dispatch as template_ids.",
+		],
 		parameters: Type.Object({
 			intent_id: Type.String(),
 			query: Type.Optional(Type.String({ description: "Search text; defaults to the intent and its hypotheses" })),
-			facets: Type.Optional(Type.Array(FingerprintEntrySchema, { description: "Facts about the SUT you already know" })),
+			facets: Type.Optional(
+				Type.Array(FingerprintEntrySchema, { description: "Facts about the SUT you already know" }),
+			),
 		}),
 		defaultActive: false,
 		async execute(_id, params) {
@@ -200,10 +236,24 @@ export function createKnowledgeSearchTool(host: MainToolHost): ToolDefinition {
 			const { fingerprint } = assembleFingerprint(o.store, ir, params.facets ?? []);
 			const r = searchTemplates(o.store, query, fingerprint);
 			o.store.tx(() => {
-				insertRetrieval(o.store, { id: newId("rt"), intentId: intent.id, query, fingerprint, hitLevel: r.hitLevel, cards: r.cards });
-				audit(o.store, { actor: "main", event: "knowledge_search", reason: `${intent.id}: ${r.hitLevel} [${r.cards.map((c) => c.id).join(", ")}]` });
+				insertRetrieval(o.store, {
+					id: newId("rt"),
+					intentId: intent.id,
+					query,
+					fingerprint,
+					hitLevel: r.hitLevel,
+					cards: r.cards,
+				});
+				audit(o.store, {
+					actor: "main",
+					event: "knowledge_search",
+					reason: `${intent.id}: ${r.hitLevel} [${r.cards.map((c) => c.id).join(", ")}]`,
+				});
 			});
-			return textResult(`hit level: ${r.hitLevel}\n${renderCards(r)}\n${GUIDANCE[r.hitLevel]}`, { hitLevel: r.hitLevel, cards: r.cards });
+			return textResult(`hit level: ${r.hitLevel}\n${renderCards(r)}\n${GUIDANCE[r.hitLevel]}`, {
+				hitLevel: r.hitLevel,
+				cards: r.cards,
+			});
 		},
 	});
 }

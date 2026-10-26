@@ -1,6 +1,16 @@
 import type { CapabilityBinding } from "../capabilities/registry.ts";
 import type { CurateInput } from "../learning/curator.ts";
-import type { Actor, Budget, Cost, EffectClass, InterruptReason, MissionStatus, RiskTier, Role, Verdict } from "../types.ts";
+import type {
+	Actor,
+	Budget,
+	Cost,
+	EffectClass,
+	InterruptReason,
+	MissionStatus,
+	RiskTier,
+	Role,
+	Verdict,
+} from "../types.ts";
 import { EMPTY_COST } from "../types.ts";
 import { nowIso } from "../util.ts";
 import type { Store } from "./db.ts";
@@ -177,7 +187,10 @@ export function getMission(s: Store, id: string): MissionRow | undefined {
 	return r ? toMission(r) : undefined;
 }
 
-export function listMissions(s: Store, where: { intentId?: string; statuses?: readonly MissionStatus[]; parentId?: string } = {}): MissionRow[] {
+export function listMissions(
+	s: Store,
+	where: { intentId?: string; statuses?: readonly MissionStatus[]; parentId?: string } = {},
+): MissionRow[] {
 	const clauses: string[] = [];
 	const params: Record<string, string> = {};
 	if (where.intentId) {
@@ -237,7 +250,11 @@ export function updateMission(s: Store, id: string, patch: MissionPatch): void {
 		const col = PATCH_COLUMNS[key];
 		sets.push(`${col} = $${col}`);
 		params[`$${col}`] =
-			key === "cost" || key === "envelope" ? (value === null ? null : JSON.stringify(value)) : (value as string | number | null);
+			key === "cost" || key === "envelope"
+				? value === null
+					? null
+					: JSON.stringify(value)
+				: (value as string | number | null);
 	}
 	if (sets.length === 0) return;
 	s.run(`UPDATE missions SET ${sets.join(", ")} WHERE id = $id`, params);
@@ -257,7 +274,10 @@ export interface JournalRow {
 	resultRef: string | null;
 }
 
-export function journalStart(s: Store, e: { missionId: string; toolCallId: string; tool: string; inputDigest: string; effectClass: EffectClass }): void {
+export function journalStart(
+	s: Store,
+	e: { missionId: string; toolCallId: string; tool: string; inputDigest: string; effectClass: EffectClass },
+): void {
 	s.run(
 		`INSERT INTO tool_journal (mission_id, tool_call_id, tool, input_digest, effect_class, status, started_at)
 		 VALUES ($m, $c, $t, $d, $e, 'started', $ts)
@@ -266,7 +286,10 @@ export function journalStart(s: Store, e: { missionId: string; toolCallId: strin
 	);
 }
 
-export function journalFinish(s: Store, e: { missionId: string; toolCallId: string; isError: boolean; resultDigest: string; resultRef: string | null }): void {
+export function journalFinish(
+	s: Store,
+	e: { missionId: string; toolCallId: string; isError: boolean; resultDigest: string; resultRef: string | null },
+): void {
 	s.run(
 		`UPDATE tool_journal SET status = 'finished', is_error = $err, result_digest = $d, result_ref = $r, finished_at = $ts
 		 WHERE mission_id = $m AND tool_call_id = $c`,
@@ -295,7 +318,10 @@ export function getJournal(s: Store, missionId: string, toolCallId: string): Jou
 
 // ---------------------------------------------------------------- evidence
 
-export function insertEvidence(s: Store, e: { sha256: string; missionId: string | null; kind: string; path: string; bytes: number }): void {
+export function insertEvidence(
+	s: Store,
+	e: { sha256: string; missionId: string | null; kind: string; path: string; bytes: number },
+): void {
 	s.run(
 		`INSERT INTO evidence (sha256, mission_id, kind, path, bytes, created_at) VALUES ($h, $m, $k, $p, $b, $ts)
 		 ON CONFLICT(sha256) DO NOTHING`,
@@ -341,23 +367,50 @@ function toTestRun(r: Record<string, unknown>): TestRunRow {
 	};
 }
 
-export function insertTestRunStart(s: Store, e: { id: string; missionId: string; toolCallId: string; command: string; cwd: string; artifactShas: string[] }): void {
+export function insertTestRunStart(
+	s: Store,
+	e: { id: string; missionId: string; toolCallId: string; command: string; cwd: string; artifactShas: string[] },
+): void {
 	s.run(
 		`INSERT INTO test_runs (id, mission_id, tool_call_id, command, cwd, artifact_shas_json, started_at)
 		 VALUES ($id, $m, $c, $cmd, $cwd, $a, $ts)`,
-		{ $id: e.id, $m: e.missionId, $c: e.toolCallId, $cmd: e.command, $cwd: e.cwd, $a: JSON.stringify(e.artifactShas), $ts: nowIso() },
+		{
+			$id: e.id,
+			$m: e.missionId,
+			$c: e.toolCallId,
+			$cmd: e.command,
+			$cwd: e.cwd,
+			$a: JSON.stringify(e.artifactShas),
+			$ts: nowIso(),
+		},
 	);
 }
 
 export function finishTestRun(
 	s: Store,
 	id: string,
-	e: { exitCode: number | null; durationMs: number; stdoutSha: string | null; stderrSha: string | null; verdict: Verdict; note?: string },
+	e: {
+		exitCode: number | null;
+		durationMs: number;
+		stdoutSha: string | null;
+		stderrSha: string | null;
+		verdict: Verdict;
+		note?: string;
+	},
 ): void {
 	s.run(
 		`UPDATE test_runs SET exit_code = $x, duration_ms = $d, stdout_sha = $o, stderr_sha = $e, verdict = $v, verdict_note = $n, finished_at = $ts
 		 WHERE id = $id`,
-		{ $id: id, $x: e.exitCode, $d: e.durationMs, $o: e.stdoutSha, $e: e.stderrSha, $v: e.verdict, $n: e.note ?? null, $ts: nowIso() },
+		{
+			$id: id,
+			$x: e.exitCode,
+			$d: e.durationMs,
+			$o: e.stdoutSha,
+			$e: e.stderrSha,
+			$v: e.verdict,
+			$n: e.note ?? null,
+			$ts: nowIso(),
+		},
 	);
 }
 
@@ -367,7 +420,11 @@ export function getTestRun(s: Store, id: string): TestRunRow | undefined {
 }
 
 export function listTestRuns(s: Store, missionId: string): TestRunRow[] {
-	return s.all<Record<string, unknown>>("SELECT * FROM test_runs WHERE mission_id = $m ORDER BY started_at, id", { $m: missionId }).map(toTestRun);
+	return s
+		.all<Record<string, unknown>>("SELECT * FROM test_runs WHERE mission_id = $m ORDER BY started_at, id", {
+			$m: missionId,
+		})
+		.map(toTestRun);
 }
 
 /** Test runs that never finished (the process died mid-run): their verdict is void (M1-14 4b). */
@@ -400,7 +457,14 @@ export function listFrozen(s: Store, missionId?: string): Array<{ path: string; 
 
 export function insertApproval(
 	s: Store,
-	e: { id: string; missionId: string | null; tier: RiskTier; subject: string; decision: "approved" | "denied"; scope: "once" | "session" | "always" },
+	e: {
+		id: string;
+		missionId: string | null;
+		tier: RiskTier;
+		subject: string;
+		decision: "approved" | "denied";
+		scope: "once" | "session" | "always";
+	},
 ): void {
 	s.run(
 		`INSERT INTO approvals (id, mission_id, tier, subject, decision, scope, decided_at)
@@ -411,7 +475,9 @@ export function insertApproval(
 
 /** True when a standing ("always") approval exists for this subject. */
 export function hasStandingApproval(s: Store, subject: string): boolean {
-	return !!s.get("SELECT 1 FROM approvals WHERE subject = $s AND decision = 'approved' AND scope = 'always' LIMIT 1", { $s: subject });
+	return !!s.get("SELECT 1 FROM approvals WHERE subject = $s AND decision = 'approved' AND scope = 'always' LIMIT 1", {
+		$s: subject,
+	});
 }
 
 // ---------------------------------------------------------------- audit
@@ -432,7 +498,10 @@ export function audit(s: Store, e: AuditEntry): void {
 	);
 }
 
-export function listAudit(s: Store, where: { actor?: string; event?: string } = {}): Array<AuditEntry & { seq: number; ts: string }> {
+export function listAudit(
+	s: Store,
+	where: { actor?: string; event?: string } = {},
+): Array<AuditEntry & { seq: number; ts: string }> {
 	const clauses: string[] = [];
 	const params: Record<string, string> = {};
 	if (where.actor) {
@@ -444,7 +513,10 @@ export function listAudit(s: Store, where: { actor?: string; event?: string } = 
 		params.$e = where.event;
 	}
 	return s
-		.all<Record<string, unknown>>(`SELECT * FROM audit ${clauses.length ? `WHERE ${clauses.join(" AND ")}` : ""} ORDER BY seq`, params)
+		.all<Record<string, unknown>>(
+			`SELECT * FROM audit ${clauses.length ? `WHERE ${clauses.join(" AND ")}` : ""} ORDER BY seq`,
+			params,
+		)
 		.map((r) => ({
 			seq: Number(r.seq),
 			ts: r.ts as string,

@@ -2,7 +2,15 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type Fingerprint, type TemplateSpec, toFingerprint } from "../../src/knowledge/schema.ts";
 import { SEED_TEMPLATES } from "../../src/knowledge/seeds/index.ts";
-import { activateFacet, getTemplate, insertCornerstone, insertEpisode, insertTemplate, proposeFacet, seedKnowledge } from "../../src/knowledge/store.ts";
+import {
+	activateFacet,
+	getTemplate,
+	insertCornerstone,
+	insertEpisode,
+	insertTemplate,
+	proposeFacet,
+	seedKnowledge,
+} from "../../src/knowledge/store.ts";
 import { proposeFacetHypothesis } from "../../src/learning/attributor.ts";
 import { applyDelta } from "../../src/learning/delta.ts";
 import { garden, similarity } from "../../src/learning/gardener.ts";
@@ -14,7 +22,8 @@ import { contrastSet } from "../../src/learning/triage.ts";
 import { insertIntent, insertMission } from "../../src/store/repos.ts";
 import { type TempProject, tempProject } from "../helpers.ts";
 
-const fp = (o: Record<string, string>): Fingerprint => toFingerprint(Object.entries(o).map(([facet, value]) => ({ facet, value, conf: 1 })));
+const fp = (o: Record<string, string>): Fingerprint =>
+	toFingerprint(Object.entries(o).map(([facet, value]) => ({ facet, value, conf: 1 })));
 
 let p: TempProject;
 beforeEach(() => {
@@ -31,7 +40,12 @@ function strategy(id = "tpl://project/oversell"): TemplateSpec {
 		type: "strategy",
 		card: { title: "Oversell", summary: "s" },
 		intent_patterns: ["超卖"],
-		applicability: { hard: [{ facet: "sut.kind", op: "eq", value: "rest-api" }], soft: [], exceptions: [], unknown_handling: [] },
+		applicability: {
+			hard: [{ facet: "sut.kind", op: "eq", value: "rest-api" }],
+			soft: [],
+			exceptions: [],
+			unknown_handling: [],
+		},
 	};
 }
 
@@ -40,16 +54,41 @@ function episode(fingerprint: Fingerprint): string {
 	const i = `i-${++n}`;
 	const m = `m-${n}`;
 	insertIntent(p.store, i, "r", {});
-	insertMission(p.store, { missionId: m, intentId: i, role: "executor", objective: "o", targets: [], testKinds: [], riskTier: "R2", riskReasons: [], budget: { tokens: 1, wallClockMs: 1 } }, join(p.paths.runsDir, m));
+	insertMission(
+		p.store,
+		{
+			missionId: m,
+			intentId: i,
+			role: "executor",
+			objective: "o",
+			targets: [],
+			testKinds: [],
+			riskTier: "R2",
+			riskReasons: [],
+			budget: { tokens: 1, wallClockMs: 1 },
+		},
+		join(p.paths.runsDir, m),
+	);
 	const id = `ep-${n}`;
-	insertEpisode(p.store, { id, missionId: m, intentId: i, sutKey: "localhost:1", fingerprint, plan: { role: "executor", templates: [], capabilities: [] }, deviations: [], outcome: "completed" });
+	insertEpisode(p.store, {
+		id,
+		missionId: m,
+		intentId: i,
+		sutKey: "localhost:1",
+		fingerprint,
+		plan: { role: "executor", templates: [], capabilities: [] },
+		deviations: [],
+		outcome: "completed",
+	});
 	return id;
 }
 
 describe("statistics", () => {
 	it("keys clusters on the template's facets plus the clustering facets", () => {
 		const s = strategy();
-		expect(clusterKey(s, fp({ "sut.kind": "rest-api", "state.resource_kind": "quota", "env.kind": "local" }))).toBe("state.resource_kind=quota|sut.kind=rest-api");
+		expect(clusterKey(s, fp({ "sut.kind": "rest-api", "state.resource_kind": "quota", "env.kind": "local" }))).toBe(
+			"state.resource_kind=quota|sut.kind=rest-api",
+		);
 	});
 
 	it("aggregates in-domain rows only and computes a conservative lower bound", () => {
@@ -64,7 +103,10 @@ describe("statistics", () => {
 });
 
 describe("contrast set (B vs K)", () => {
-	const cs = [fp({ "sut.kind": "rest-api", "consistency.model": "sync" }), fp({ "sut.kind": "rest-api", "consistency.model": "sync" })];
+	const cs = [
+		fp({ "sut.kind": "rest-api", "consistency.model": "sync" }),
+		fp({ "sut.kind": "rest-api", "consistency.model": "sync" }),
+	];
 	it("finds the smallest separating facet", () => {
 		const r = contrastSet(fp({ "sut.kind": "rest-api", "consistency.model": "eventual" }), cs);
 		expect(r.contrast?.facets).toEqual([{ facet: "consistency.model", values: ["eventual"] }]);
@@ -79,17 +121,41 @@ describe("contrast set (B vs K)", () => {
 describe("delta operators", () => {
 	it("are incremental and refuse ill-fitting payloads", () => {
 		const s = strategy();
-		const ex = applyDelta(s, "b", "except", { exception: { id: "ex-1", when: [{ facet: "consistency.model", op: "eq", value: "eventual" }], action: "exclude", because: "x", source: "experience" } });
+		const ex = applyDelta(s, "b", "except", {
+			exception: {
+				id: "ex-1",
+				when: [{ facet: "consistency.model", op: "eq", value: "eventual" }],
+				action: "exclude",
+				because: "x",
+				source: "experience",
+			},
+		});
 		expect(ex.spec.applicability.exceptions.map((e) => e.id)).toEqual(["ex-1"]);
 		expect(s.applicability.exceptions).toHaveLength(0); // input untouched
-		expect(() => applyDelta(ex.spec, "b", "except", { exception: { id: "ex-1", when: [], action: "exclude", because: "", source: "experience" } })).toThrow(/exists/);
+		expect(() =>
+			applyDelta(ex.spec, "b", "except", {
+				exception: { id: "ex-1", when: [], action: "exclude", because: "", source: "experience" },
+			}),
+		).toThrow(/exists/);
 		const rev = applyDelta(s, "b", "revise", { path: "slots.oracle.text", value: "settle first", reason: "r" });
 		expect(rev.spec.slots.oracle?.text).toBe("settle first");
 		expect(rev.spec.applicability).toEqual(s.applicability);
-		const nar = applyDelta(ex.spec, "b", "narrow", { facet: "consistency.model", exception_ids: ["ex-1"], hard: { facet: "consistency.model", op: "not_in", values: ["eventual"] } });
+		const nar = applyDelta(ex.spec, "b", "narrow", {
+			facet: "consistency.model",
+			exception_ids: ["ex-1"],
+			hard: { facet: "consistency.model", op: "not_in", values: ["eventual"] },
+		});
 		expect(nar.spec.applicability.exceptions).toHaveLength(0);
 		expect(nar.spec.applicability.hard.at(-1)?.facet).toBe("consistency.model");
-		const gen = applyDelta({ ...s, applicability: { ...s.applicability, hard: [{ facet: "sut.stack", op: "in", values: ["node/express"] }] } }, "b", "generalize", { facet: "sut.stack", from: ["node/express"], to: "node" });
+		const gen = applyDelta(
+			{
+				...s,
+				applicability: { ...s.applicability, hard: [{ facet: "sut.stack", op: "in", values: ["node/express"] }] },
+			},
+			"b",
+			"generalize",
+			{ facet: "sut.stack", from: ["node/express"], to: "node" },
+		);
 		expect(gen.spec.applicability.hard[0].values).toEqual(["node"]);
 	});
 });
@@ -101,17 +167,37 @@ describe("gate", () => {
 		proposeFacet(p.store, "consistency.model", ["sync"], {});
 		activateFacet(p.store, "consistency.model");
 		const eps = [1, 2, 3].map(() => episode(fp({ "sut.kind": "rest-api", "consistency.model": "sync" })));
-		for (const e of eps) insertCornerstone(p.store, { templateId: t.id, episodeId: e, fingerprint: fp({ "sut.kind": "rest-api", "consistency.model": "sync" }) });
+		for (const e of eps)
+			insertCornerstone(p.store, {
+				templateId: t.id,
+				episodeId: e,
+				fingerprint: fp({ "sut.kind": "rest-api", "consistency.model": "sync" }),
+			});
 		return { id: t.id, eps };
 	}
 	const exception = (when: Record<string, string>, id = "ex-a") => ({
-		exception: { id, when: Object.entries(when).map(([facet, value]) => ({ facet, op: "eq" as const, value })), action: "exclude" as const, because: "b", source: "experience" as const },
+		exception: {
+			id,
+			when: Object.entries(when).map(([facet, value]) => ({ facet, op: "eq" as const, value })),
+			action: "exclude" as const,
+			because: "b",
+			source: "experience" as const,
+		},
 	});
 
 	it("commits a boundary delta that keeps every cornerstone verdict, with enough evidence", () => {
 		const { id } = withCornerstones();
-		const ev = [episode(fp({ "sut.kind": "rest-api", "consistency.model": "eventual" })), episode(fp({ "sut.kind": "rest-api", "consistency.model": "eventual" }))];
-		const r = proposeDelta(p.store, { op: "except", target: id, payload: exception({ "consistency.model": "eventual" }), evidence: ev, proposedBy: "test" });
+		const ev = [
+			episode(fp({ "sut.kind": "rest-api", "consistency.model": "eventual" })),
+			episode(fp({ "sut.kind": "rest-api", "consistency.model": "eventual" })),
+		];
+		const r = proposeDelta(p.store, {
+			op: "except",
+			target: id,
+			payload: exception({ "consistency.model": "eventual" }),
+			evidence: ev,
+			proposedBy: "test",
+		});
 		expect(r.report.decision).toBe("committed");
 		expect(r.report.replay.every((x) => x.ok)).toBe(true);
 		expect(getTemplate(p.store, id)?.version).toBe(2);
@@ -120,10 +206,23 @@ describe("gate", () => {
 	it("re-gates a suspended hypothesis once evidence accumulates", () => {
 		const { id } = withCornerstones();
 		const e1 = episode(fp({ "sut.kind": "rest-api", "consistency.model": "eventual" }));
-		const first = proposeDelta(p.store, { op: "except", target: id, payload: exception({ "consistency.model": "eventual" }), evidence: [e1], proposedBy: "test" });
+		const first = proposeDelta(p.store, {
+			op: "except",
+			target: id,
+			payload: exception({ "consistency.model": "eventual" }),
+			evidence: [e1],
+			proposedBy: "test",
+		});
 		expect(first.report.decision).toBe("suspended");
 		const e2 = episode(fp({ "sut.kind": "rest-api", "consistency.model": "eventual" }));
-		const again = proposeDelta(p.store, { op: "except", target: id, payload: exception({ "consistency.model": "eventual" }), evidence: [e1, e2], proposedBy: "test", deltaId: first.id });
+		const again = proposeDelta(p.store, {
+			op: "except",
+			target: id,
+			payload: exception({ "consistency.model": "eventual" }),
+			evidence: [e1, e2],
+			proposedBy: "test",
+			deltaId: first.id,
+		});
 		expect(again).toMatchObject({ id: first.id, report: { decision: "committed" } });
 		expect(listDeltas(p.store, { status: "committed" }).map((d) => d.id)).toEqual([first.id]);
 	});
@@ -131,12 +230,26 @@ describe("gate", () => {
 	it("suspends below the evidence threshold (stable templates need more)", () => {
 		const { id } = withCornerstones();
 		const ev = [episode(fp({ "sut.kind": "rest-api", "consistency.model": "eventual" }))];
-		expect(proposeDelta(p.store, { op: "except", target: id, payload: exception({ "consistency.model": "eventual" }), evidence: ev, proposedBy: "test" }).report).toMatchObject({ decision: "suspended", evidence: { have: 1, need: 2 } });
+		expect(
+			proposeDelta(p.store, {
+				op: "except",
+				target: id,
+				payload: exception({ "consistency.model": "eventual" }),
+				evidence: ev,
+				proposedBy: "test",
+			}).report,
+		).toMatchObject({ decision: "suspended", evidence: { have: 1, need: 2 } });
 	});
 
 	it("rejects a delta that changes a cornerstone verdict, with the replay report", () => {
 		const { id, eps } = withCornerstones();
-		const r = proposeDelta(p.store, { op: "except", target: id, payload: exception({ "sut.kind": "rest-api" }, "ex-bad"), evidence: eps, proposedBy: "test" });
+		const r = proposeDelta(p.store, {
+			op: "except",
+			target: id,
+			payload: exception({ "sut.kind": "rest-api" }, "ex-bad"),
+			evidence: eps,
+			proposedBy: "test",
+		});
 		expect(r.report.decision).toBe("rejected");
 		expect(r.report.replay.filter((x) => !x.ok)).toHaveLength(3);
 		expect(r.report.replay[0]).toMatchObject({ before: "true", after: "false/ex-bad" });
@@ -146,11 +259,44 @@ describe("gate", () => {
 
 	it("rejects severity fields, oversized payloads, and unresolved references", () => {
 		const { id, eps } = withCornerstones();
-		expect(proposeDelta(p.store, { op: "pitfall", target: id, payload: { text: "x", severity: "critical" }, evidence: eps, proposedBy: "t" }).report.decision).toBe("rejected");
-		expect(proposeDelta(p.store, { op: "pitfall", target: id, payload: { text: "x".repeat(5000) }, evidence: eps, proposedBy: "t" }).report.decision).toBe("rejected");
-		const patch = { exception: { ...exception({ "consistency.model": "eventual" }).exception, action: "patch" as const, patch: { slot: "oracle", use: "tpl://project/missing" } } };
-		const ev = [episode(fp({ "sut.kind": "rest-api", "consistency.model": "eventual" })), episode(fp({ "sut.kind": "rest-api", "consistency.model": "eventual" }))];
-		expect(proposeDelta(p.store, { op: "except", target: id, payload: patch, evidence: ev, proposedBy: "t" }).report.checks.find((c) => c.name === "references resolve")?.ok).toBe(false);
+		expect(
+			proposeDelta(p.store, {
+				op: "pitfall",
+				target: id,
+				payload: { text: "x", severity: "critical" },
+				evidence: eps,
+				proposedBy: "t",
+			}).report.decision,
+		).toBe("rejected");
+		expect(
+			proposeDelta(p.store, {
+				op: "pitfall",
+				target: id,
+				payload: { text: "x".repeat(5000) },
+				evidence: eps,
+				proposedBy: "t",
+			}).report.decision,
+		).toBe("rejected");
+		const patch = {
+			exception: {
+				...exception({ "consistency.model": "eventual" }).exception,
+				action: "patch" as const,
+				patch: { slot: "oracle", use: "tpl://project/missing" },
+			},
+		};
+		const ev = [
+			episode(fp({ "sut.kind": "rest-api", "consistency.model": "eventual" })),
+			episode(fp({ "sut.kind": "rest-api", "consistency.model": "eventual" })),
+		];
+		expect(
+			proposeDelta(p.store, {
+				op: "except",
+				target: id,
+				payload: patch,
+				evidence: ev,
+				proposedBy: "t",
+			}).report.checks.find((c) => c.name === "references resolve")?.ok,
+		).toBe(false);
 	});
 
 	it("never edits a global template: changes go to a project override", () => {
@@ -176,21 +322,47 @@ describe("state machine", () => {
 
 	it("stable → deprecated when the escape hatch triggers", () => {
 		const s = strategy();
-		s.applicability.exceptions = Array.from({ length: 9 }, (_, i) => ({ id: `ex-${i}`, when: [{ facet: "sut.stack", op: "eq" as const, value: `v${i}` }], action: "exclude" as const, because: "b", source: "experience" as const }));
+		s.applicability.exceptions = Array.from({ length: 9 }, (_, i) => ({
+			id: `ex-${i}`,
+			when: [{ facet: "sut.stack", op: "eq" as const, value: `v${i}` }],
+			action: "exclude" as const,
+			because: "b",
+			source: "experience" as const,
+		}));
 		const t = insertTemplate(p.store, s, "b", { status: "stable", changelog: "t" });
 		expect(nextStatus(p.store, t.id)).toMatchObject({ to: "deprecated" });
 	});
 });
 
 describe("attributor", () => {
-	const input = { failure: fp({ "sut.kind": "rest-api" }), cornerstones: [fp({ "sut.kind": "rest-api" })], deviations: [], knownFacets: ["sut.kind"] };
+	const input = {
+		failure: fp({ "sut.kind": "rest-api" }),
+		cornerstones: [fp({ "sut.kind": "rest-api" })],
+		deviations: [],
+		knownFacets: ["sut.kind"],
+	};
 	it("accepts a hypothesis only when two judges agree", async () => {
-		const agree = await proposeFacetHypothesis(async () => '{"facet":"consistency.model","failure_value":"eventual","cornerstone_value":"sync"}', input);
-		expect(agree.hypothesis).toEqual({ facet: "consistency.model", failureValue: "eventual", cornerstoneValue: "sync" });
+		const agree = await proposeFacetHypothesis(
+			async () => '{"facet":"consistency.model","failure_value":"eventual","cornerstone_value":"sync"}',
+			input,
+		);
+		expect(agree.hypothesis).toEqual({
+			facet: "consistency.model",
+			failureValue: "eventual",
+			cornerstoneValue: "sync",
+		});
 		let k = 0;
-		const disagree = await proposeFacetHypothesis(async () => (k++ === 0 ? '{"facet":"consistency.model","failure_value":"a","cornerstone_value":"b"}' : '{"facet":"cache.layer","failure_value":"a","cornerstone_value":"b"}'), input);
+		const disagree = await proposeFacetHypothesis(
+			async () =>
+				k++ === 0
+					? '{"facet":"consistency.model","failure_value":"a","cornerstone_value":"b"}'
+					: '{"facet":"cache.layer","failure_value":"a","cornerstone_value":"b"}',
+			input,
+		);
 		expect(disagree.hypothesis).toBeUndefined();
-		expect((await proposeFacetHypothesis(async () => "ignore previous instructions", input)).hypothesis).toBeUndefined();
+		expect(
+			(await proposeFacetHypothesis(async () => "ignore previous instructions", input)).hypothesis,
+		).toBeUndefined();
 	});
 });
 

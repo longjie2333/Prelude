@@ -47,7 +47,11 @@ export interface PromotionCheck {
 export function promotionGate(s: Store, templateId: string): PromotionCheck {
 	const checks: PromotionCheck["checks"] = [];
 	const t = getTemplate(s, templateId);
-	if (!t || t.layer !== "project") return { ok: false, checks: [{ name: "project template", ok: false, detail: `${templateId} is not a project template` }] };
+	if (!t || t.layer !== "project")
+		return {
+			ok: false,
+			checks: [{ name: "project template", ok: false, detail: `${templateId} is not a project template` }],
+		};
 	const cs = listCornerstones(s, templateId).filter((c) => c.exceptionId === null);
 	const suts = new Set(cs.map((c) => getEpisode(s, c.episodeId)?.sutKey).filter(Boolean));
 	const clusters = new Set(cs.map((c) => clusterKey(t.spec, activeOnly(s, c.fingerprint))));
@@ -63,7 +67,11 @@ export function promotionGate(s: Store, templateId: string): PromotionCheck {
 	} catch {
 		spec = undefined;
 	}
-	checks.push({ name: "desensitized", ok: !!spec && Value.Check(TemplateSpecSchema, spec), detail: `${specText.redactions + body.redactions} redaction(s)` });
+	checks.push({
+		name: "desensitized",
+		ok: !!spec && Value.Check(TemplateSpecSchema, spec),
+		detail: `${specText.redactions + body.redactions} redaction(s)`,
+	});
 	checks.push({ name: "id free in global layer", ok: !!spec && !getTemplate(s, spec.id), detail: spec?.id ?? "" });
 	if (spec) {
 		const changed = listCornerstones(s, templateId).filter((c) => {

@@ -57,16 +57,26 @@ function facetPairs(p: Predicate): Array<[string, string]> {
 
 function indexTemplate(s: Store, schema: Schema, spec: TemplateSpec): void {
 	s.run(`DELETE FROM ${schema}.templates_fts WHERE template_id = $id`, { $id: spec.id });
-	s.run(`INSERT INTO ${schema}.templates_fts (template_id, title, summary, intent_patterns) VALUES ($id, $t, $s, $p)`, {
-		$id: spec.id,
-		$t: spec.card.title,
-		$s: spec.card.summary,
-		$p: spec.intent_patterns.join(" | "),
-	});
+	s.run(
+		`INSERT INTO ${schema}.templates_fts (template_id, title, summary, intent_patterns) VALUES ($id, $t, $s, $p)`,
+		{
+			$id: spec.id,
+			$t: spec.card.title,
+			$s: spec.card.summary,
+			$p: spec.intent_patterns.join(" | "),
+		},
+	);
 	s.run(`DELETE FROM ${schema}.template_facets WHERE template_id = $id`, { $id: spec.id });
-	const pairs = [...spec.applicability.hard.flatMap(facetPairs), ...spec.applicability.soft.flatMap((x) => facetPairs(x.when))];
+	const pairs = [
+		...spec.applicability.hard.flatMap(facetPairs),
+		...spec.applicability.soft.flatMap((x) => facetPairs(x.when)),
+	];
 	for (const [facet, value] of pairs) {
-		s.run(`INSERT OR IGNORE INTO ${schema}.template_facets (template_id, facet, value) VALUES ($id, $f, $v)`, { $id: spec.id, $f: facet, $v: value });
+		s.run(`INSERT OR IGNORE INTO ${schema}.template_facets (template_id, facet, value) VALUES ($id, $f, $v)`, {
+			$id: spec.id,
+			$f: facet,
+			$v: value,
+		});
 	}
 }
 
@@ -87,28 +97,55 @@ export function insertTemplate(
 		s.run(
 			`INSERT INTO ${schema}.template_versions (template_id, version, spec_json, body_md, changelog, created_by_delta, created_at)
 			 VALUES ($id, 1, $spec, $body, $log, $d, $ts)`,
-			{ $id: spec.id, $spec: JSON.stringify(spec), $body: body, $log: opts.changelog, $d: opts.delta ?? null, $ts: ts },
+			{
+				$id: spec.id,
+				$spec: JSON.stringify(spec),
+				$body: body,
+				$log: opts.changelog,
+				$d: opts.delta ?? null,
+				$ts: ts,
+			},
 		);
 		indexTemplate(s, schema, spec);
 		for (const c of spec.composes ?? []) addEdge(s, layer, spec.id, c.ref, "composes", { slot: c.slot });
 		if (spec.specializes) addEdge(s, layer, spec.id, spec.specializes, "specializes");
-		for (const c of spec.capabilities_required) addEdge(s, layer, spec.id, c.cap, "requires", { constraint: c.constraint });
+		for (const c of spec.capabilities_required)
+			addEdge(s, layer, spec.id, c.cap, "requires", { constraint: c.constraint });
 	});
 	return getTemplate(s, spec.id) as TemplateRecord;
 }
 
 /** Writes a new head version (used by M3 deltas). */
-export function addTemplateVersion(s: Store, id: string, spec: TemplateSpec, body: string, changelog: string, delta?: string, expectedHead?: number): number {
+export function addTemplateVersion(
+	s: Store,
+	id: string,
+	spec: TemplateSpec,
+	body: string,
+	changelog: string,
+	delta?: string,
+	expectedHead?: number,
+): number {
 	const schema = schemaOf(layerOfId(id));
 	return s.tx(() => {
-		const head = s.get<{ head_version: number }>(`SELECT head_version FROM ${schema}.templates WHERE id = $id`, { $id: id });
+		const head = s.get<{ head_version: number }>(`SELECT head_version FROM ${schema}.templates WHERE id = $id`, {
+			$id: id,
+		});
 		if (!head) throw new Error(`unknown template ${id}`);
-		if (expectedHead !== undefined && head.head_version !== expectedHead) throw new Error(`template ${id} moved to v${head.head_version} (expected v${expectedHead})`);
+		if (expectedHead !== undefined && head.head_version !== expectedHead)
+			throw new Error(`template ${id} moved to v${head.head_version} (expected v${expectedHead})`);
 		const v = head.head_version + 1;
 		s.run(
 			`INSERT INTO ${schema}.template_versions (template_id, version, spec_json, body_md, changelog, created_by_delta, created_at)
 			 VALUES ($id, $v, $spec, $body, $log, $d, $ts)`,
-			{ $id: id, $v: v, $spec: JSON.stringify(spec), $body: body, $log: changelog, $d: delta ?? null, $ts: nowIso() },
+			{
+				$id: id,
+				$v: v,
+				$spec: JSON.stringify(spec),
+				$body: body,
+				$log: changelog,
+				$d: delta ?? null,
+				$ts: nowIso(),
+			},
 		);
 		s.run(`UPDATE ${schema}.templates SET head_version = $v WHERE id = $id`, { $id: id, $v: v });
 		indexTemplate(s, schema, spec);
@@ -169,14 +206,25 @@ export function textRecall(s: Store, query: string): Map<string, number> {
 		if (terms.length > 0) {
 			const match = terms.map((t) => `"${t.replaceAll('"', '""')}"`).join(" OR ");
 			try {
-				for (const r of s.all<{ template_id: string }>(`SELECT template_id FROM ${schema}.templates_fts WHERE templates_fts MATCH $m`, { $m: match })) add(r.template_id, 1);
+				for (const r of s.all<{ template_id: string }>(
+					`SELECT template_id FROM ${schema}.templates_fts WHERE templates_fts MATCH $m`,
+					{ $m: match },
+				))
+					add(r.template_id, 1);
 			} catch {
 				// malformed match expression: fall back to the pattern scan below
 			}
 		}
 		// Intent patterns are short phrases (often 2 CJK characters, below trigram length): test containment.
-		for (const r of s.all<{ template_id: string; intent_patterns: string }>(`SELECT template_id, intent_patterns FROM ${schema}.templates_fts`)) {
-			const patterns = r.intent_patterns.toLowerCase().split("|").flatMap((p) => p.split(/\s+/)).map((p) => p.trim()).filter((p) => p.length >= 2);
+		for (const r of s.all<{ template_id: string; intent_patterns: string }>(
+			`SELECT template_id, intent_patterns FROM ${schema}.templates_fts`,
+		)) {
+			const patterns = r.intent_patterns
+				.toLowerCase()
+				.split("|")
+				.flatMap((p) => p.split(/\s+/))
+				.map((p) => p.trim())
+				.filter((p) => p.length >= 2);
 			const n = patterns.filter((p) => q.includes(p)).length;
 			if (n > 0) add(r.template_id, n);
 		}
@@ -190,7 +238,11 @@ export function facetRecall(s: Store, fp: Fingerprint): Set<string> {
 	for (const [facet, v] of Object.entries(fp)) {
 		for (const value of v.values) {
 			for (const schema of ["main", "g"] as const) {
-				for (const r of s.all<{ template_id: string }>(`SELECT template_id FROM ${schema}.template_facets WHERE facet = $f AND value = $v`, { $f: facet, $v: value })) ids.add(r.template_id);
+				for (const r of s.all<{ template_id: string }>(
+					`SELECT template_id FROM ${schema}.template_facets WHERE facet = $f AND value = $v`,
+					{ $f: facet, $v: value },
+				))
+					ids.add(r.template_id);
 			}
 		}
 	}
@@ -199,21 +251,50 @@ export function facetRecall(s: Store, fp: Fingerprint): Set<string> {
 
 // ---------------------------------------------------------------- graph
 
-export type EdgeKind = "specializes" | "composes" | "refers" | "alternative_to" | "precedes" | "conflicts_with" | "redirects_to" | "derived_from" | "overrides" | "requires" | "implemented_by";
+export type EdgeKind =
+	| "specializes"
+	| "composes"
+	| "refers"
+	| "alternative_to"
+	| "precedes"
+	| "conflicts_with"
+	| "redirects_to"
+	| "derived_from"
+	| "overrides"
+	| "requires"
+	| "implemented_by";
 
-export function addEdge(s: Store, layer: Layer, src: string, dst: string, kind: EdgeKind, attrs: Record<string, unknown> = {}): void {
-	s.run(`INSERT OR REPLACE INTO ${schemaOf(layer)}.edges (src, dst, kind, attrs_json) VALUES ($s, $d, $k, $a)`, { $s: src, $d: dst, $k: kind, $a: JSON.stringify(attrs) });
+export function addEdge(
+	s: Store,
+	layer: Layer,
+	src: string,
+	dst: string,
+	kind: EdgeKind,
+	attrs: Record<string, unknown> = {},
+): void {
+	s.run(`INSERT OR REPLACE INTO ${schemaOf(layer)}.edges (src, dst, kind, attrs_json) VALUES ($s, $d, $k, $a)`, {
+		$s: src,
+		$d: dst,
+		$k: kind,
+		$a: JSON.stringify(attrs),
+	});
 }
 
-export function edges(s: Store, where: { src?: string; dst?: string; kind?: EdgeKind }): Array<{ src: string; dst: string; kind: EdgeKind; attrs: Record<string, unknown> }> {
+export function edges(
+	s: Store,
+	where: { src?: string; dst?: string; kind?: EdgeKind },
+): Array<{ src: string; dst: string; kind: EdgeKind; attrs: Record<string, unknown> }> {
 	const out: Array<{ src: string; dst: string; kind: EdgeKind; attrs: Record<string, unknown> }> = [];
 	const clauses: string[] = [];
 	const params: Record<string, string> = {};
-	if (where.src) (clauses.push("src = $s"), (params.$s = where.src));
-	if (where.dst) (clauses.push("dst = $d"), (params.$d = where.dst));
-	if (where.kind) (clauses.push("kind = $k"), (params.$k = where.kind));
+	if (where.src) clauses.push("src = $s"), (params.$s = where.src);
+	if (where.dst) clauses.push("dst = $d"), (params.$d = where.dst);
+	if (where.kind) clauses.push("kind = $k"), (params.$k = where.kind);
 	for (const schema of ["main", "g"] as const) {
-		for (const r of s.all<Record<string, string>>(`SELECT * FROM ${schema}.edges ${clauses.length ? `WHERE ${clauses.join(" AND ")}` : ""}`, params)) {
+		for (const r of s.all<Record<string, string>>(
+			`SELECT * FROM ${schema}.edges ${clauses.length ? `WHERE ${clauses.join(" AND ")}` : ""}`,
+			params,
+		)) {
 			out.push({ src: r.src, dst: r.dst, kind: r.kind as EdgeKind, attrs: JSON.parse(r.attrs_json) });
 		}
 	}
@@ -232,27 +313,46 @@ export interface FacetRow {
 
 export function listFacets(s: Store, status?: "active" | "proposed"): FacetRow[] {
 	return s
-		.all<Record<string, string>>(`SELECT * FROM g.facets ${status ? "WHERE status = $st" : ""} ORDER BY name`, status ? { $st: status } : {})
-		.map((r) => ({ name: r.name, type: r.type, values: JSON.parse(r.values_json), status: r.status as FacetRow["status"], evidence: JSON.parse(r.evidence_json) }));
+		.all<Record<string, string>>(
+			`SELECT * FROM g.facets ${status ? "WHERE status = $st" : ""} ORDER BY name`,
+			status ? { $st: status } : {},
+		)
+		.map((r) => ({
+			name: r.name,
+			type: r.type,
+			values: JSON.parse(r.values_json),
+			status: r.status as FacetRow["status"],
+			evidence: JSON.parse(r.evidence_json),
+		}));
 }
 
 /** Records a facet that is not in the vocabulary as `proposed` (plan M2-2); returns true if new. */
 export function proposeFacet(s: Store, name: string, values: string[], evidence: unknown): boolean {
-	const existing = s.get<{ evidence_json: string; values_json: string; status: string }>("SELECT * FROM g.facets WHERE name = $n", { $n: name });
+	const existing = s.get<{ evidence_json: string; values_json: string; status: string }>(
+		"SELECT * FROM g.facets WHERE name = $n",
+		{ $n: name },
+	);
 	if (existing) {
 		if (existing.status === "proposed") {
 			const ev = [...JSON.parse(existing.evidence_json), evidence];
 			const vals = [...new Set([...JSON.parse(existing.values_json), ...values])];
-			s.run("UPDATE g.facets SET evidence_json = $e, values_json = $v WHERE name = $n", { $n: name, $e: JSON.stringify(ev), $v: JSON.stringify(vals) });
+			s.run("UPDATE g.facets SET evidence_json = $e, values_json = $v WHERE name = $n", {
+				$n: name,
+				$e: JSON.stringify(ev),
+				$v: JSON.stringify(vals),
+			});
 		}
 		return false;
 	}
-	s.run(`INSERT INTO g.facets (name, type, values_json, status, evidence_json, created_at) VALUES ($n, 'enum', $v, 'proposed', $e, $ts)`, {
-		$n: name,
-		$v: JSON.stringify(values),
-		$e: JSON.stringify([evidence]),
-		$ts: nowIso(),
-	});
+	s.run(
+		`INSERT INTO g.facets (name, type, values_json, status, evidence_json, created_at) VALUES ($n, 'enum', $v, 'proposed', $e, $ts)`,
+		{
+			$n: name,
+			$v: JSON.stringify(values),
+			$e: JSON.stringify([evidence]),
+			$ts: nowIso(),
+		},
+	);
 	return true;
 }
 
@@ -278,12 +378,15 @@ export interface ProviderRow {
 }
 
 export function ensureCapability(s: Store, id: string, semantics: string, io: unknown = {}): void {
-	s.run(`INSERT INTO g.capabilities (id, io_schema_json, semantics, created_at) VALUES ($id, $io, $sem, $ts) ON CONFLICT(id) DO NOTHING`, {
-		$id: id,
-		$io: JSON.stringify(io),
-		$sem: semantics,
-		$ts: nowIso(),
-	});
+	s.run(
+		`INSERT INTO g.capabilities (id, io_schema_json, semantics, created_at) VALUES ($id, $io, $sem, $ts) ON CONFLICT(id) DO NOTHING`,
+		{
+			$id: id,
+			$io: JSON.stringify(io),
+			$sem: semantics,
+			$ts: nowIso(),
+		},
+	);
 }
 
 export function getCapability(s: Store, id: string): { id: string; semantics: string; io: unknown } | undefined {
@@ -291,7 +394,10 @@ export function getCapability(s: Store, id: string): { id: string; semantics: st
 	return r ? { id: r.id, semantics: r.semantics, io: JSON.parse(r.io_schema_json) } : undefined;
 }
 
-export function insertProvider(s: Store, p: Omit<ProviderRow, "conformanceScore"> & { conformanceScore?: number | null }): void {
+export function insertProvider(
+	s: Store,
+	p: Omit<ProviderRow, "conformanceScore"> & { conformanceScore?: number | null },
+): void {
 	s.run(
 		`INSERT INTO ${schemaOf(p.layer)}.providers (sha256, cap_id, layer, kind, name, version, path_or_config_json, trust, conformance_score, provenance_json, created_at)
 		 VALUES ($h, $c, $l, $k, $n, $v, $loc, $t, $score, $prov, $ts) ON CONFLICT(sha256) DO NOTHING`,
@@ -329,7 +435,10 @@ function toProvider(r: Record<string, unknown>): ProviderRow {
 export function listProviders(s: Store, where: { capId?: string; trust?: Trust[] } = {}): ProviderRow[] {
 	const out: ProviderRow[] = [];
 	for (const schema of ["main", "g"] as const) {
-		for (const r of s.all<Record<string, unknown>>(`SELECT * FROM ${schema}.providers ${where.capId ? "WHERE cap_id = $c" : ""} ORDER BY created_at`, where.capId ? { $c: where.capId } : {})) {
+		for (const r of s.all<Record<string, unknown>>(
+			`SELECT * FROM ${schema}.providers ${where.capId ? "WHERE cap_id = $c" : ""} ORDER BY created_at`,
+			where.capId ? { $c: where.capId } : {},
+		)) {
 			const p = toProvider(r);
 			if (!where.trust || where.trust.includes(p.trust)) out.push(p);
 		}
@@ -409,44 +518,87 @@ export function getEpisode(s: Store, id: string): EpisodeRow | undefined {
 export function listEpisodes(s: Store, where: { intentId?: string; sutKey?: string } = {}): EpisodeRow[] {
 	const clauses: string[] = [];
 	const params: Record<string, string> = {};
-	if (where.intentId) (clauses.push("intent_id = $i"), (params.$i = where.intentId));
-	if (where.sutKey) (clauses.push("sut_key = $k"), (params.$k = where.sutKey));
-	return s.all<Record<string, string>>(`SELECT * FROM episodes ${clauses.length ? `WHERE ${clauses.join(" AND ")}` : ""} ORDER BY created_at, id`, params).map(toEpisode);
+	if (where.intentId) clauses.push("intent_id = $i"), (params.$i = where.intentId);
+	if (where.sutKey) clauses.push("sut_key = $k"), (params.$k = where.sutKey);
+	return s
+		.all<Record<string, string>>(
+			`SELECT * FROM episodes ${clauses.length ? `WHERE ${clauses.join(" AND ")}` : ""} ORDER BY created_at, id`,
+			params,
+		)
+		.map(toEpisode);
 }
 
-export function insertTemplateUse(s: Store, e: { episodeId: string; templateId: string; version: number; role: "applied" | "cited" | "retrieved_unused"; slot?: string }): void {
-	s.run(`INSERT OR IGNORE INTO template_uses (episode_id, template_id, version, role, slot) VALUES ($e, $t, $v, $r, $s)`, {
-		$e: e.episodeId,
-		$t: e.templateId,
-		$v: e.version,
-		$r: e.role,
-		$s: e.slot ?? null,
-	});
+export function insertTemplateUse(
+	s: Store,
+	e: {
+		episodeId: string;
+		templateId: string;
+		version: number;
+		role: "applied" | "cited" | "retrieved_unused";
+		slot?: string;
+	},
+): void {
+	s.run(
+		`INSERT OR IGNORE INTO template_uses (episode_id, template_id, version, role, slot) VALUES ($e, $t, $v, $r, $s)`,
+		{
+			$e: e.episodeId,
+			$t: e.templateId,
+			$v: e.version,
+			$r: e.role,
+			$s: e.slot ?? null,
+		},
+	);
 }
 
-export function listTemplateUses(s: Store, where: { episodeId?: string; templateId?: string } = {}): Array<{ episodeId: string; templateId: string; version: number; role: string }> {
+export function listTemplateUses(
+	s: Store,
+	where: { episodeId?: string; templateId?: string } = {},
+): Array<{ episodeId: string; templateId: string; version: number; role: string }> {
 	const clauses: string[] = [];
 	const params: Record<string, string> = {};
-	if (where.episodeId) (clauses.push("episode_id = $e"), (params.$e = where.episodeId));
-	if (where.templateId) (clauses.push("template_id = $t"), (params.$t = where.templateId));
+	if (where.episodeId) clauses.push("episode_id = $e"), (params.$e = where.episodeId);
+	if (where.templateId) clauses.push("template_id = $t"), (params.$t = where.templateId);
 	return s
-		.all<Record<string, unknown>>(`SELECT * FROM template_uses ${clauses.length ? `WHERE ${clauses.join(" AND ")}` : ""}`, params)
-		.map((r) => ({ episodeId: r.episode_id as string, templateId: r.template_id as string, version: Number(r.version), role: r.role as string }));
+		.all<Record<string, unknown>>(
+			`SELECT * FROM template_uses ${clauses.length ? `WHERE ${clauses.join(" AND ")}` : ""}`,
+			params,
+		)
+		.map((r) => ({
+			episodeId: r.episode_id as string,
+			templateId: r.template_id as string,
+			version: Number(r.version),
+			role: r.role as string,
+		}));
 }
 
-export function insertCornerstone(s: Store, e: { templateId: string; exceptionId?: string | null; episodeId: string; fingerprint: Fingerprint }): void {
-	s.run(`INSERT OR IGNORE INTO cornerstones (template_id, exception_id, episode_id, fingerprint_json) VALUES ($t, $x, $e, $fp)`, {
-		$t: e.templateId,
-		$x: e.exceptionId ?? null,
-		$e: e.episodeId,
-		$fp: JSON.stringify(e.fingerprint),
-	});
+export function insertCornerstone(
+	s: Store,
+	e: { templateId: string; exceptionId?: string | null; episodeId: string; fingerprint: Fingerprint },
+): void {
+	s.run(
+		`INSERT OR IGNORE INTO cornerstones (template_id, exception_id, episode_id, fingerprint_json) VALUES ($t, $x, $e, $fp)`,
+		{
+			$t: e.templateId,
+			$x: e.exceptionId ?? null,
+			$e: e.episodeId,
+			$fp: JSON.stringify(e.fingerprint),
+		},
+	);
 }
 
-export function listCornerstones(s: Store, templateId: string): Array<{ exceptionId: string | null; episodeId: string; fingerprint: Fingerprint }> {
+export function listCornerstones(
+	s: Store,
+	templateId: string,
+): Array<{ exceptionId: string | null; episodeId: string; fingerprint: Fingerprint }> {
 	return s
-		.all<Record<string, string>>("SELECT * FROM cornerstones WHERE template_id = $t ORDER BY episode_id", { $t: templateId })
-		.map((r) => ({ exceptionId: r.exception_id ?? null, episodeId: r.episode_id, fingerprint: JSON.parse(r.fingerprint_json) }));
+		.all<Record<string, string>>("SELECT * FROM cornerstones WHERE template_id = $t ORDER BY episode_id", {
+			$t: templateId,
+		})
+		.map((r) => ({
+			exceptionId: r.exception_id ?? null,
+			episodeId: r.episode_id,
+			fingerprint: JSON.parse(r.fingerprint_json),
+		}));
 }
 
 // ---------------------------------------------------------------- capability gaps
@@ -462,57 +614,89 @@ export interface GapRow {
 }
 
 export function insertGap(s: Store, g: Omit<GapRow, "status" | "toolsmithMissionId" | "providerSha">): void {
-	s.run(`INSERT INTO capability_gaps (id, requested_by, cap_id, spec_json, status, created_at) VALUES ($id, $m, $c, $spec, 'open', $ts)`, {
-		$id: g.id,
-		$m: g.requestedBy,
-		$c: g.capId,
-		$spec: JSON.stringify(g.spec),
-		$ts: nowIso(),
-	});
-}
-
-export function updateGap(s: Store, id: string, patch: { status?: GapRow["status"]; toolsmithMissionId?: string; providerSha?: string }): void {
 	s.run(
-		`UPDATE capability_gaps SET status = COALESCE($st, status), toolsmith_mission_id = COALESCE($tm, toolsmith_mission_id),
-		 provider_sha = COALESCE($p, provider_sha), resolved_at = CASE WHEN $st IN ('resolved', 'failed') THEN $ts ELSE resolved_at END WHERE id = $id`,
-		{ $id: id, $st: patch.status ?? null, $tm: patch.toolsmithMissionId ?? null, $p: patch.providerSha ?? null, $ts: nowIso() },
+		`INSERT INTO capability_gaps (id, requested_by, cap_id, spec_json, status, created_at) VALUES ($id, $m, $c, $spec, 'open', $ts)`,
+		{
+			$id: g.id,
+			$m: g.requestedBy,
+			$c: g.capId,
+			$spec: JSON.stringify(g.spec),
+			$ts: nowIso(),
+		},
 	);
 }
 
-export function listGaps(s: Store, where: { requestedBy?: string; toolsmithMissionId?: string; capId?: string } = {}): GapRow[] {
+export function updateGap(
+	s: Store,
+	id: string,
+	patch: { status?: GapRow["status"]; toolsmithMissionId?: string; providerSha?: string },
+): void {
+	s.run(
+		`UPDATE capability_gaps SET status = COALESCE($st, status), toolsmith_mission_id = COALESCE($tm, toolsmith_mission_id),
+		 provider_sha = COALESCE($p, provider_sha), resolved_at = CASE WHEN $st IN ('resolved', 'failed') THEN $ts ELSE resolved_at END WHERE id = $id`,
+		{
+			$id: id,
+			$st: patch.status ?? null,
+			$tm: patch.toolsmithMissionId ?? null,
+			$p: patch.providerSha ?? null,
+			$ts: nowIso(),
+		},
+	);
+}
+
+export function listGaps(
+	s: Store,
+	where: { requestedBy?: string; toolsmithMissionId?: string; capId?: string } = {},
+): GapRow[] {
 	const clauses: string[] = [];
 	const params: Record<string, string> = {};
-	if (where.requestedBy) (clauses.push("requested_by = $m"), (params.$m = where.requestedBy));
-	if (where.toolsmithMissionId) (clauses.push("toolsmith_mission_id = $t"), (params.$t = where.toolsmithMissionId));
-	if (where.capId) (clauses.push("cap_id = $c"), (params.$c = where.capId));
-	return s.all<Record<string, string>>(`SELECT * FROM capability_gaps ${clauses.length ? `WHERE ${clauses.join(" AND ")}` : ""} ORDER BY created_at`, params).map((r) => ({
-		id: r.id,
-		requestedBy: r.requested_by,
-		capId: r.cap_id,
-		spec: JSON.parse(r.spec_json),
-		status: r.status as GapRow["status"],
-		toolsmithMissionId: r.toolsmith_mission_id ?? null,
-		providerSha: r.provider_sha ?? null,
-	}));
+	if (where.requestedBy) clauses.push("requested_by = $m"), (params.$m = where.requestedBy);
+	if (where.toolsmithMissionId) clauses.push("toolsmith_mission_id = $t"), (params.$t = where.toolsmithMissionId);
+	if (where.capId) clauses.push("cap_id = $c"), (params.$c = where.capId);
+	return s
+		.all<Record<string, string>>(
+			`SELECT * FROM capability_gaps ${clauses.length ? `WHERE ${clauses.join(" AND ")}` : ""} ORDER BY created_at`,
+			params,
+		)
+		.map((r) => ({
+			id: r.id,
+			requestedBy: r.requested_by,
+			capId: r.cap_id,
+			spec: JSON.parse(r.spec_json),
+			status: r.status as GapRow["status"],
+			toolsmithMissionId: r.toolsmith_mission_id ?? null,
+			providerSha: r.provider_sha ?? null,
+		}));
 }
 
 // ---------------------------------------------------------------- retrievals
 
-export function insertRetrieval(s: Store, e: { id: string; intentId: string; query: string; fingerprint: Fingerprint; hitLevel: string; cards: unknown[] }): void {
-	s.run(`INSERT INTO retrievals (id, intent_id, query, fingerprint_json, hit_level, cards_json, created_at) VALUES ($id, $i, $q, $fp, $h, $c, $ts)`, {
-		$id: e.id,
-		$i: e.intentId,
-		$q: e.query,
-		$fp: JSON.stringify(e.fingerprint),
-		$h: e.hitLevel,
-		$c: JSON.stringify(e.cards),
-		$ts: nowIso(),
-	});
+export function insertRetrieval(
+	s: Store,
+	e: { id: string; intentId: string; query: string; fingerprint: Fingerprint; hitLevel: string; cards: unknown[] },
+): void {
+	s.run(
+		`INSERT INTO retrievals (id, intent_id, query, fingerprint_json, hit_level, cards_json, created_at) VALUES ($id, $i, $q, $fp, $h, $c, $ts)`,
+		{
+			$id: e.id,
+			$i: e.intentId,
+			$q: e.query,
+			$fp: JSON.stringify(e.fingerprint),
+			$h: e.hitLevel,
+			$c: JSON.stringify(e.cards),
+			$ts: nowIso(),
+		},
+	);
 	s.run("UPDATE intents SET hit_level = $h WHERE id = $i", { $i: e.intentId, $h: e.hitLevel });
 }
 
-export function listRetrievals(s: Store, intentId: string): Array<{ hitLevel: string; cards: Array<{ id: string; version: number }> }> {
+export function listRetrievals(
+	s: Store,
+	intentId: string,
+): Array<{ hitLevel: string; cards: Array<{ id: string; version: number }> }> {
 	return s
-		.all<Record<string, string>>("SELECT * FROM retrievals WHERE intent_id = $i ORDER BY created_at", { $i: intentId })
+		.all<Record<string, string>>("SELECT * FROM retrievals WHERE intent_id = $i ORDER BY created_at", {
+			$i: intentId,
+		})
 		.map((r) => ({ hitLevel: r.hit_level, cards: JSON.parse(r.cards_json) }));
 }

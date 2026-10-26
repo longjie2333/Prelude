@@ -25,10 +25,12 @@ export function clusterFacets(spec: TemplateSpec): string[] {
 }
 
 export function clusterKey(spec: TemplateSpec, fp: Fingerprint): string {
-	return clusterFacets(spec)
-		.filter((f) => fp[f])
-		.map((f) => `${f}=${[...fp[f].values].sort().join("+")}`)
-		.join("|") || "default";
+	return (
+		clusterFacets(spec)
+			.filter((f) => fp[f])
+			.map((f) => `${f}=${[...fp[f].values].sort().join("+")}`)
+			.join("|") || "default"
+	);
 }
 
 export interface StatRow {
@@ -40,24 +42,49 @@ export interface StatRow {
 
 export function getStats(s: Store, templateId: string): StatRow[] {
 	return s
-		.all<Record<string, unknown>>("SELECT * FROM template_stats WHERE template_id = $t ORDER BY cluster_key", { $t: templateId })
-		.map((r) => ({ templateId: r.template_id as string, clusterKey: r.cluster_key as string, alpha: Number(r.alpha), beta: Number(r.beta) }));
+		.all<Record<string, unknown>>("SELECT * FROM template_stats WHERE template_id = $t ORDER BY cluster_key", {
+			$t: templateId,
+		})
+		.map((r) => ({
+			templateId: r.template_id as string,
+			clusterKey: r.cluster_key as string,
+			alpha: Number(r.alpha),
+			beta: Number(r.beta),
+		}));
 }
 
 export function bumpStats(s: Store, templateId: string, cluster: string, dAlpha: number, dBeta: number): void {
 	s.run(
 		`INSERT INTO template_stats (template_id, cluster_key, alpha, beta, updated_at) VALUES ($t, $c, $a, $b, $ts)
 		 ON CONFLICT(template_id, cluster_key) DO UPDATE SET alpha = alpha + $da, beta = beta + $db, updated_at = $ts`,
-		{ $t: templateId, $c: cluster, $a: PRIOR.alpha + dAlpha, $b: PRIOR.beta + dBeta, $da: dAlpha, $db: dBeta, $ts: nowIso() },
+		{
+			$t: templateId,
+			$c: cluster,
+			$a: PRIOR.alpha + dAlpha,
+			$b: PRIOR.beta + dBeta,
+			$da: dAlpha,
+			$db: dBeta,
+			$ts: nowIso(),
+		},
 	);
 }
 
 /** Support/contradiction of one exception (`B` evidence, or successes under it). */
-export function bumpException(s: Store, templateId: string, exceptionId: string, support: number, contradict = 0): void {
+export function bumpException(
+	s: Store,
+	templateId: string,
+	exceptionId: string,
+	support: number,
+	contradict = 0,
+): void {
 	bumpStats(s, templateId, `${EXCEPTION_PREFIX}${exceptionId}`, support, contradict);
 }
 
-export function exceptionSupport(s: Store, templateId: string, exceptionId: string): { support: number; contradict: number } {
+export function exceptionSupport(
+	s: Store,
+	templateId: string,
+	exceptionId: string,
+): { support: number; contradict: number } {
 	const r = getStats(s, templateId).find((x) => x.clusterKey === `${EXCEPTION_PREFIX}${exceptionId}`);
 	return r ? { support: r.alpha - PRIOR.alpha, contradict: r.beta - PRIOR.beta } : { support: 0, contradict: 0 };
 }

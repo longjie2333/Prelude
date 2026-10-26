@@ -59,7 +59,9 @@ export function verifyBinding(b: CapabilityBinding): BindingCheck {
 	if (b.kind !== "skill" || !b.path) return { ok: true };
 	try {
 		const now = hashDirectory(b.path);
-		return now === b.sha256 ? { ok: true } : { ok: false, reason: `content hash changed (${b.sha256.slice(0, 8)} → ${now.slice(0, 8)})` };
+		return now === b.sha256
+			? { ok: true }
+			: { ok: false, reason: `content hash changed (${b.sha256.slice(0, 8)} → ${now.slice(0, 8)})` };
 	} catch (err) {
 		return { ok: false, reason: `provider files unreadable: ${(err as Error).message}` };
 	}
@@ -84,7 +86,9 @@ export function resolveCapabilities(s: Store, capIds: readonly string[], actor: 
 	const r: Resolution = { bindings: [], missing: [], mismatched: [] };
 	for (const capId of [...new Set(capIds)]) {
 		const candidates = listProviders(s, { capId, trust: ["pinned", "verified"] }).sort(
-			(a, b) => (b.trust === "pinned" ? 1 : 0) - (a.trust === "pinned" ? 1 : 0) || (b.conformanceScore ?? 0) - (a.conformanceScore ?? 0),
+			(a, b) =>
+				(b.trust === "pinned" ? 1 : 0) - (a.trust === "pinned" ? 1 : 0) ||
+				(b.conformanceScore ?? 0) - (a.conformanceScore ?? 0),
 		);
 		let bound: CapabilityBinding | undefined;
 		for (const p of candidates) {

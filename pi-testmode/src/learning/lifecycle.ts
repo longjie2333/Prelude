@@ -50,11 +50,14 @@ export function nextStatus(s: Store, templateId: string): Transition | undefined
 	const rows = getStats(s, templateId);
 	const { alpha, beta } = aggregate(rows);
 	const lb = lowerBound(alpha, beta);
-	const origin = edges(s, { src: templateId, kind: "derived_from" }).find((e) => e.dst.startsWith("intent:"))?.dst.slice("intent:".length);
+	const origin = edges(s, { src: templateId, kind: "derived_from" })
+		.find((e) => e.dst.startsWith("intent:"))
+		?.dst.slice("intent:".length);
 
 	if (t.status === "draft") {
 		const reuse = positiveUses(s, templateId).filter((u) => u.intentId !== origin);
-		if (reuse.length >= 1) return { from: "draft", to: "candidate", reason: `reused successfully in ${reuse.length} other intent(s)` };
+		if (reuse.length >= 1)
+			return { from: "draft", to: "candidate", reason: `reused successfully in ${reuse.length} other intent(s)` };
 		return undefined;
 	}
 	if (t.status === "candidate") {
@@ -62,18 +65,38 @@ export function nextStatus(s: Store, templateId: string): Transition | undefined
 		const clusters = new Set(cs.map((c) => clusterKey(t.spec, activeOnly(s, c.fingerprint))));
 		const openK = listDeltas(s, { target: templateId, status: "suspended" }).some((d) => d.op === "revise");
 		if (cs.length >= 3 && clusters.size >= 2 && lb >= STABLE_THETA && !openK) {
-			return { from: "candidate", to: "stable", reason: `${cs.length} cornerstones over ${clusters.size} clusters, lower bound ${lb.toFixed(2)}` };
+			return {
+				from: "candidate",
+				to: "stable",
+				reason: `${cs.length} cornerstones over ${clusters.size} clusters, lower bound ${lb.toFixed(2)}`,
+			};
 		}
 		const uses = alpha + beta - 2;
-		if (uses >= 5 && posteriorMean(alpha, beta) < 0.3) return { from: "candidate", to: "retired", reason: `posterior mean ${posteriorMean(alpha, beta).toFixed(2)} over ${uses} uses` };
+		if (uses >= 5 && posteriorMean(alpha, beta) < 0.3)
+			return {
+				from: "candidate",
+				to: "retired",
+				reason: `posterior mean ${posteriorMean(alpha, beta).toFixed(2)} over ${uses} uses`,
+			};
 		return undefined;
 	}
 	if (t.status === "stable") {
-		if (t.spec.applicability.exceptions.length > MAX_EXCEPTIONS) return { from: "stable", to: "deprecated", reason: `escape hatch: ${t.spec.applicability.exceptions.length} exceptions` };
+		if (t.spec.applicability.exceptions.length > MAX_EXCEPTIONS)
+			return {
+				from: "stable",
+				to: "deprecated",
+				reason: `escape hatch: ${t.spec.applicability.exceptions.length} exceptions`,
+			};
 		const region = knownRegion(s, templateId);
-		if (region.peak >= 4 && region.now < region.peak / 2) return { from: "stable", to: "deprecated", reason: `escape hatch: known region ${region.now}/${region.peak}` };
+		if (region.peak >= 4 && region.now < region.peak / 2)
+			return { from: "stable", to: "deprecated", reason: `escape hatch: known region ${region.now}/${region.peak}` };
 		const failLb = lowerBound(beta, alpha);
-		if (failLb > 0.5) return { from: "stable", to: "deprecated", reason: `escape hatch: failure rate lower bound ${failLb.toFixed(2)}` };
+		if (failLb > 0.5)
+			return {
+				from: "stable",
+				to: "deprecated",
+				reason: `escape hatch: failure rate lower bound ${failLb.toFixed(2)}`,
+			};
 	}
 	return undefined;
 }
@@ -83,12 +106,19 @@ export function applyLifecycle(s: Store, templateId: string): Transition | undef
 	if (!tr) return undefined;
 	s.tx(() => {
 		setTemplateStatus(s, templateId, tr.to);
-		audit(s, { actor: "main", event: "template_status", decision: tr.to, reason: `${templateId}: ${tr.from} → ${tr.to} (${tr.reason})` });
+		audit(s, {
+			actor: "main",
+			event: "template_status",
+			decision: tr.to,
+			reason: `${templateId}: ${tr.from} → ${tr.to} (${tr.reason})`,
+		});
 	});
 	return tr;
 }
 
 /** Episodes credited to a template (for /test-why). */
 export function creditedEpisodes(s: Store, templateId: string): string[] {
-	return listEpisodes(s, {}).filter((e) => e.plan.templates.some((x) => x.id === templateId)).map((e) => e.id);
+	return listEpisodes(s, {})
+		.filter((e) => e.plan.templates.some((x) => x.id === templateId))
+		.map((e) => e.id);
 }

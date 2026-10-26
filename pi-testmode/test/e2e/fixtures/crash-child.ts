@@ -29,8 +29,20 @@ const router = createRouter(agentDir, {
 			]),
 	],
 });
-const o = new Orchestrator({ paths, agentDir, store, modelRuntime: router.runtime, noSandbox: true, heartbeatMs: 200, missionSettings: { retry: { enabled: false } } });
+const o = new Orchestrator({
+	paths,
+	agentDir,
+	store,
+	modelRuntime: router.runtime,
+	noSandbox: true,
+	heartbeatMs: 200,
+	missionSettings: { retry: { enabled: false } },
+});
 insertIntent(store, "i-crash", "crash test", { constraints: { environment: "local" } });
-const [outcome] = await o.dispatch("i-crash", [{ role: "executor", objective: "make orders", targets: [url], testKinds: ["functional"] }], router.model());
+const [outcome] = await o.dispatch(
+	"i-crash",
+	[{ role: "executor", objective: "make orders", targets: [url], testKinds: ["functional"] }],
+	router.model(),
+);
 process.stdout.write(`${JSON.stringify(outcome)}\n`);
 setInterval(() => undefined, 1000);

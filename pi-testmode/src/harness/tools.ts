@@ -11,7 +11,15 @@ import { canonicalPath, isInside } from "../kernel/paths.ts";
 import type { TestmodePaths } from "../paths.ts";
 import { EnvelopeSchema, type Envelope, validateClaimsAgainstRuns } from "../missions/envelope.ts";
 import type { Store } from "../store/db.ts";
-import { audit, finishTestRun, freezeArtifact, insertTestRunStart, listFrozen, listTestRuns, type MissionSpecRecord } from "../store/repos.ts";
+import {
+	audit,
+	finishTestRun,
+	freezeArtifact,
+	insertTestRunStart,
+	listFrozen,
+	listTestRuns,
+	type MissionSpecRecord,
+} from "../store/repos.ts";
 import type { Role, Verdict } from "../types.ts";
 import { newId, sha256, textResult, truncate } from "../util.ts";
 import { evidenceUri, putEvidence } from "./evidence.ts";
@@ -30,7 +38,10 @@ export interface MissionToolHost {
 	onSubmit(envelope: Envelope): void;
 	requestCapability?(req: CapabilityRequest): { message: string; gapId?: string };
 	/** Toolsmith: connect an MCP server through pi's MCP extension and return its tool definitions. */
-	probeMcp?(server: string, config: unknown): Promise<Array<{ name: string; description: string; parameters: unknown; annotations?: unknown }>>;
+	probeMcp?(
+		server: string,
+		config: unknown,
+	): Promise<Array<{ name: string; description: string; parameters: unknown; annotations?: unknown }>>;
 	approve?(req: { tier: "R2" | "R3" | "R4"; subject: string; title: string; detail: string }): Promise<boolean>;
 }
 
@@ -44,13 +55,17 @@ export interface CapabilityRequest {
 const TAIL = 2000;
 
 /** Exit code → verdict. 126/127 mean the command could not run at all, which is no verdict on the SUT. */
-export function verdictFor(r: { exitCode: number | null; timedOut: boolean; aborted: boolean; spawnError?: string }): { verdict: Verdict; note?: string } {
+export function verdictFor(r: { exitCode: number | null; timedOut: boolean; aborted: boolean; spawnError?: string }): {
+	verdict: Verdict;
+	note?: string;
+} {
 	if (r.spawnError) return { verdict: "error", note: `spawn failed: ${r.spawnError}` };
 	if (r.aborted) return { verdict: "inconclusive", note: "aborted" };
 	if (r.timedOut) return { verdict: "inconclusive", note: "timed out" };
 	if (r.exitCode === null) return { verdict: "inconclusive", note: "killed by signal" };
 	if (r.exitCode === 0) return { verdict: "pass" };
-	if (r.exitCode === 126 || r.exitCode === 127) return { verdict: "error", note: `command not runnable (exit ${r.exitCode})` };
+	if (r.exitCode === 126 || r.exitCode === 127)
+		return { verdict: "error", note: `command not runnable (exit ${r.exitCode})` };
 	return { verdict: "fail" };
 }
 
@@ -77,7 +92,11 @@ export function createTestRunTool(host: MissionToolHost): ToolDefinition {
 		],
 		parameters: Type.Object({
 			command: Type.String({ description: "Shell command (same shell as bash)" }),
-			cwd: Type.Optional(Type.String({ description: "Working directory, relative to the project root. Default: your run directory" })),
+			cwd: Type.Optional(
+				Type.String({
+					description: "Working directory, relative to the project root. Default: your run directory",
+				}),
+			),
 			timeout_s: Type.Optional(Type.Number({ description: "Timeout in seconds (default 300, max 1800)" })),
 			purpose: Type.Optional(Type.String({ description: "What property this run checks" })),
 		}),
@@ -85,12 +104,36 @@ export function createTestRunTool(host: MissionToolHost): ToolDefinition {
 			const cwd = params.cwd ? resolve(host.root, params.cwd) : host.runDir;
 			const id = newId("tr");
 			const frozen = checkFrozen(host);
-			insertTestRunStart(host.store, { id, missionId: host.missionId, toolCallId, command: params.command, cwd, artifactShas: frozen.shas });
+			insertTestRunStart(host.store, {
+				id,
+				missionId: host.missionId,
+				toolCallId,
+				command: params.command,
+				cwd,
+				artifactShas: frozen.shas,
+			});
 			if (frozen.tampered.length > 0) {
 				const note = `frozen artifacts changed after freezing: ${frozen.tampered.join(", ")}`;
-				finishTestRun(host.store, id, { exitCode: null, durationMs: 0, stdoutSha: null, stderrSha: null, verdict: "error", note });
-				audit(host.store, { actor: `mission:${host.missionId}`, event: "artifact_tamper", tool: "test_run", decision: "block", reason: note });
-				return textResult(`test_run ${id}: verdict error — ${note}. Tampered runs never count.`, { id, verdict: "error" }, { isError: true });
+				finishTestRun(host.store, id, {
+					exitCode: null,
+					durationMs: 0,
+					stdoutSha: null,
+					stderrSha: null,
+					verdict: "error",
+					note,
+				});
+				audit(host.store, {
+					actor: `mission:${host.missionId}`,
+					event: "artifact_tamper",
+					tool: "test_run",
+					decision: "block",
+					reason: note,
+				});
+				return textResult(
+					`test_run ${id}: verdict error — ${note}. Tampered runs never count.`,
+					{ id, verdict: "error" },
+					{ isError: true },
+				);
 			}
 			const timeoutMs = Math.min(Math.max(params.timeout_s ?? 300, 1), 1800) * 1000;
 			const r = await runShell(params.command, {
@@ -102,7 +145,14 @@ export function createTestRunTool(host: MissionToolHost): ToolDefinition {
 			const out = putEvidence(host.store, host.evidenceDir, r.stdout, { missionId: host.missionId, kind: "stdout" });
 			const err = putEvidence(host.store, host.evidenceDir, r.stderr, { missionId: host.missionId, kind: "stderr" });
 			const { verdict, note } = verdictFor(r);
-			finishTestRun(host.store, id, { exitCode: r.exitCode, durationMs: r.durationMs, stdoutSha: out.sha256, stderrSha: err.sha256, verdict, note });
+			finishTestRun(host.store, id, {
+				exitCode: r.exitCode,
+				durationMs: r.durationMs,
+				stdoutSha: out.sha256,
+				stderrSha: err.sha256,
+				verdict,
+				note,
+			});
 			const text = [
 				`test_run ${id}: verdict ${verdict}${note ? ` (${note})` : ""}, exit ${r.exitCode ?? "none"}, ${r.durationMs}ms`,
 				`stdout: ${evidenceUri(out.sha256)}  stderr: ${evidenceUri(err.sha256)}`,
@@ -136,7 +186,10 @@ export function createArtifactFreezeTool(host: MissionToolHost): ToolDefinition 
 				if (!isInside(canon, runDir)) throw new Error(`${p} is outside your run directory`);
 				if (!existsSync(abs) || !statSync(abs).isFile()) throw new Error(`${p} does not exist or is not a file`);
 				const data = readFileSync(abs);
-				const ref = putEvidence(host.store, host.evidenceDir, data, { missionId: host.missionId, kind: "artifact" });
+				const ref = putEvidence(host.store, host.evidenceDir, data, {
+					missionId: host.missionId,
+					kind: "artifact",
+				});
 				freezeArtifact(host.store, { missionId: host.missionId, path: canon, sha256: ref.sha256 });
 				frozen.push({ path: relative(host.runDir, abs).replaceAll("\\", "/"), sha256: ref.sha256 });
 			}
@@ -164,14 +217,22 @@ export function createMissionSubmitTool(host: MissionToolHost): ToolDefinition {
 			const errors = validateClaimsAgainstRuns(params.claims, runs, host.missionId);
 			if (host.role === "verifier" && host.spec.verify) {
 				const own = new Set(runs.map((r) => r.id));
-				if (!params.verification?.length) errors.push("verifier envelopes must include verification entries for each claim");
+				if (!params.verification?.length)
+					errors.push("verifier envelopes must include verification entries for each claim");
 				for (const v of params.verification ?? []) {
-					for (const id of v.test_run_ids) if (!own.has(id)) errors.push(`verification of ${v.claim_id} cites ${id}, which is not one of your test_runs`);
+					for (const id of v.test_run_ids)
+						if (!own.has(id))
+							errors.push(`verification of ${v.claim_id} cites ${id}, which is not one of your test_runs`);
 				}
 			}
-			if (errors.length > 0) throw new Error(`Envelope rejected:\n- ${errors.join("\n- ")}\nFix and call mission_submit again.`);
+			if (errors.length > 0)
+				throw new Error(`Envelope rejected:\n- ${errors.join("\n- ")}\nFix and call mission_submit again.`);
 			host.onSubmit(params);
-			return textResult(`Envelope accepted (${params.status}, ${params.claims.length} claims). Mission ends.`, { status: params.status }, { terminate: true });
+			return textResult(
+				`Envelope accepted (${params.status}, ${params.claims.length} claims). Mission ends.`,
+				{ status: params.status },
+				{ terminate: true },
+			);
 		},
 	});
 }

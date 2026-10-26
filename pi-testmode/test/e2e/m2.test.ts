@@ -6,9 +6,23 @@
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
-import { type AgentSession, createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
+import {
+	type AgentSession,
+	createAgentSession,
+	DefaultResourceLoader,
+	SessionManager,
+	SettingsManager,
+} from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { edges, getProvider, listGaps, listProviders, listRetrievals, listTemplates, listTemplateUses } from "../../src/knowledge/store.ts";
+import {
+	edges,
+	getProvider,
+	listGaps,
+	listProviders,
+	listRetrievals,
+	listTemplates,
+	listTemplateUses,
+} from "../../src/knowledge/store.ts";
 import { createTestmodeExtension } from "../../src/mode.ts";
 import type { Orchestrator } from "../../src/orchestrator/orchestrator.ts";
 import { intentCost } from "../../src/orchestrator/report.ts";
@@ -17,7 +31,8 @@ import { debugFile, startCanary, type TempProject, tempProject, waitFor } from "
 import { createRouter, idFrom, type Step } from "./faux.ts";
 
 const SECRET = "SECRET-USER-SKILL-7f3a";
-const SKILL_MD = "---\nname: stock-read\ndescription: Read a product's current stock as JSON. Use to snapshot state before and after a burst.\n---\nRun `node read.mjs <base-url> <product-id>`; prints {\"value\":n,\"read_at\":iso}.\n";
+const SKILL_MD =
+	'---\nname: stock-read\ndescription: Read a product\'s current stock as JSON. Use to snapshot state before and after a burst.\n---\nRun `node read.mjs <base-url> <product-id>`; prints {"value":n,"read_at":iso}.\n';
 const READ_MJS = `const [base, id] = process.argv.slice(2);
 const r = await fetch(base + "/products/" + id);
 const p = await r.json();
@@ -35,7 +50,10 @@ console.log(JSON.stringify({ before, accepted, after }));
 process.exit(accepted <= before && after === before - accepted ? 0 : 1);
 `;
 
-const call = (name: string, args: Parameters<typeof fauxToolCall>[1]): Step => () => fauxAssistantMessage(fauxToolCall(name, args));
+const call =
+	(name: string, args: Parameters<typeof fauxToolCall>[1]): Step =>
+	() =>
+		fauxAssistantMessage(fauxToolCall(name, args));
 
 let p: TempProject;
 let canary: Awaited<ReturnType<typeof startCanary>>;
@@ -45,10 +63,18 @@ beforeEach(async () => {
 	p = tempProject();
 	canary = await startCanary({ bugs: new Set(["B1"]) });
 	mkdirSync(p.paths.dir, { recursive: true });
-	writeFileSync(p.paths.scopeFile, JSON.stringify({ targets: [{ host: `localhost:${canary.port}`, envs: ["local"], allowed: ["functional", "load"] }] }));
+	writeFileSync(
+		p.paths.scopeFile,
+		JSON.stringify({
+			targets: [{ host: `localhost:${canary.port}`, envs: ["local"], allowed: ["functional", "load"] }],
+		}),
+	);
 	const userSkill = join(p.agentDir, "skills", "secret-skill");
 	mkdirSync(userSkill, { recursive: true });
-	writeFileSync(join(userSkill, "SKILL.md"), `---\nname: secret-skill\ndescription: ${SECRET} user skill that must never reach test mode.\n---\nbody\n`);
+	writeFileSync(
+		join(userSkill, "SKILL.md"),
+		`---\nname: secret-skill\ndescription: ${SECRET} user skill that must never reach test mode.\n---\nbody\n`,
+	);
 });
 
 afterEach(async () => {
@@ -65,7 +91,11 @@ const CAP = "cap:state.snapshot.read";
 const reader = () => join(listProviders(p.store, { capId: CAP })[0].location.path as string, "read.mjs");
 const intentIR = (raw: string) => ({
 	raw,
-	goal: { kind: "find_defects", quality_attributes: ["correctness.consistency"], hypotheses: ["concurrent orders oversell stock"] },
+	goal: {
+		kind: "find_defects",
+		quality_attributes: ["correctness.consistency"],
+		hypotheses: ["concurrent orders oversell stock"],
+	},
 	sut_refs: [{ kind: "api", locator: `${canary.url}/openapi.json`, env: "local" }],
 	constraints: { environment: "local", data: "synthetic-only" },
 	acceptance: ["evidence-backed verdict on oversell"],
@@ -77,7 +107,13 @@ function executorScript(product: string, opts: { explore: boolean; template: () 
 	return [
 		...(opts.explore ? [call("bash", { command: `curl -s ${canary.url}/openapi.json` })] : []),
 		() => fauxAssistantMessage(fauxToolCall("read", { path: join(reader(), "..", "SKILL.md") })),
-		(ctx) => fauxAssistantMessage(fauxToolCall("write", { path: join(ctx.info.runDir as string, "oversell.mjs"), content: oversell(canary.url, product, reader()) })),
+		(ctx) =>
+			fauxAssistantMessage(
+				fauxToolCall("write", {
+					path: join(ctx.info.runDir as string, "oversell.mjs"),
+					content: oversell(canary.url, product, reader()),
+				}),
+			),
 		call("artifact_freeze", { paths: ["oversell.mjs"] }),
 		call("test_run", { command: "node oversell.mjs" }),
 		(ctx) => {
@@ -86,7 +122,16 @@ function executorScript(product: string, opts: { explore: boolean; template: () 
 				fauxToolCall("mission_submit", {
 					status: "completed",
 					summary: `oversell of ${product} reproduced`,
-					claims: [{ id: "c1", type: "defect", statement: `Concurrent orders oversell ${product}`, test_run_ids: [runId], oracle: { kind: "conservation-invariant", strength: "high" }, minimal_repro: "node oversell.mjs" }],
+					claims: [
+						{
+							id: "c1",
+							type: "defect",
+							statement: `Concurrent orders oversell ${product}`,
+							test_run_ids: [runId],
+							oracle: { kind: "conservation-invariant", strength: "high" },
+							minimal_repro: "node oversell.mjs",
+						},
+					],
 					used_templates: [{ id: opts.template(), role: "applied" }],
 				}),
 			);
@@ -98,8 +143,18 @@ const verifierScript: Step[] = [0, 1].flatMap(() => [
 	call("test_run", { command: "node oversell.mjs" }),
 	call("test_run", { command: "node oversell.mjs" }),
 	(ctx) => {
-		const ids = ctx.toolResults().filter((r) => r.toolName === "test_run").map((r) => idFrom(r.text, "tr"));
-		return fauxAssistantMessage(fauxToolCall("mission_submit", { status: "completed", summary: "replayed", claims: [{ id: "v1", type: "observation", statement: "replayed" }], verification: [{ claim_id: "c1", test_run_ids: ids }] }));
+		const ids = ctx
+			.toolResults()
+			.filter((r) => r.toolName === "test_run")
+			.map((r) => idFrom(r.text, "tr"));
+		return fauxAssistantMessage(
+			fauxToolCall("mission_submit", {
+				status: "completed",
+				summary: "replayed",
+				claims: [{ id: "v1", type: "observation", statement: "replayed" }],
+				verification: [{ claim_id: "c1", test_run_ids: ids }],
+			}),
+		);
 	},
 ]);
 
@@ -111,36 +166,87 @@ describe("M2: templates, capabilities, progressive disclosure", () => {
 		const scripts: Record<string, Step[]> = {
 			main: [
 				call("intent_record", intentIR("测一下 canary 的下单接口在并发下会不会超卖")),
-				(ctx) => ((i1 = idFrom(ctx.lastToolResult(), "i")), fauxAssistantMessage(fauxToolCall("knowledge_search", { intent_id: i1 }))),
+				(ctx) => (
+					(i1 = idFrom(ctx.lastToolResult(), "i")),
+					fauxAssistantMessage(fauxToolCall("knowledge_search", { intent_id: i1 }))
+				),
 				(ctx) => {
 					expect(ctx.lastToolResult()).toMatch(/hit level: H0/);
-					return fauxAssistantMessage(fauxToolCall("mission_dispatch", { intent_id: i1, missions: [{ role: "scout", objective: "Learn the order API and its state model", targets: [canary.url], test_kinds: ["functional"] }] }));
+					return fauxAssistantMessage(
+						fauxToolCall("mission_dispatch", {
+							intent_id: i1,
+							missions: [
+								{
+									role: "scout",
+									objective: "Learn the order API and its state model",
+									targets: [canary.url],
+									test_kinds: ["functional"],
+								},
+							],
+						}),
+					);
 				},
 				(ctx) => {
 					expect(ctx.lastUserText()).toMatch(/capability cap:state\.snapshot\.read: resolved/);
 					return fauxAssistantMessage(
 						fauxToolCall("mission_dispatch", {
 							intent_id: i1,
-							missions: [{ role: "executor", objective: "Oversell under 30 concurrent orders of p1", targets: [canary.url], test_kinds: ["functional", "load"], template_ids: ["tpl://global/oracle.conservation-invariant"], capabilities: [CAP] }],
+							missions: [
+								{
+									role: "executor",
+									objective: "Oversell under 30 concurrent orders of p1",
+									targets: [canary.url],
+									test_kinds: ["functional", "load"],
+									template_ids: ["tpl://global/oracle.conservation-invariant"],
+									capabilities: [CAP],
+								},
+							],
 						}),
 					);
 				},
-				(ctx) => (expect(ctx.lastUserText()).toContain("confirmed"), fauxAssistantMessage(fauxToolCall("report_finalize", { intent_id: i1, conclusion: "p1 oversells (B1)." }))),
+				(ctx) => (
+					expect(ctx.lastUserText()).toContain("confirmed"),
+					fauxAssistantMessage(
+						fauxToolCall("report_finalize", { intent_id: i1, conclusion: "p1 oversells (B1)." }),
+					)
+				),
 				() => fauxAssistantMessage(fauxText("run 1 done")),
 				call("intent_record", intentIR("看看 canary 的 p5 商品在并发下单时会不会超卖")),
-				(ctx) => ((i2 = idFrom(ctx.lastToolResult(), "i")), fauxAssistantMessage(fauxToolCall("knowledge_search", { intent_id: i2 }))),
+				(ctx) => (
+					(i2 = idFrom(ctx.lastToolResult(), "i")),
+					fauxAssistantMessage(fauxToolCall("knowledge_search", { intent_id: i2 }))
+				),
 				(ctx) => {
 					expect(ctx.lastToolResult()).toMatch(/hit level: H2/);
 					projectTpl = ctx.lastToolResult().match(/1\. (tpl:\/\/project\/[^@\s]+)@/)?.[1] ?? "";
 					return fauxAssistantMessage(
-						fauxToolCall("mission_dispatch", { intent_id: i2, missions: [{ role: "executor", objective: "Oversell under 30 concurrent orders of p5", targets: [canary.url], test_kinds: ["functional", "load"], template_ids: [projectTpl] }] }),
+						fauxToolCall("mission_dispatch", {
+							intent_id: i2,
+							missions: [
+								{
+									role: "executor",
+									objective: "Oversell under 30 concurrent orders of p5",
+									targets: [canary.url],
+									test_kinds: ["functional", "load"],
+									template_ids: [projectTpl],
+								},
+							],
+						}),
 					);
 				},
-				() => fauxAssistantMessage(fauxToolCall("report_finalize", { intent_id: i2, conclusion: "p5 oversells too." })),
+				() =>
+					fauxAssistantMessage(
+						fauxToolCall("report_finalize", { intent_id: i2, conclusion: "p5 oversells too." }),
+					),
 				() => fauxAssistantMessage(fauxText("run 2 done")),
 			],
 			scout: [
-				call("capability_request", { cap: CAP, semantics: "read a product's current stock, repeatedly during a burst", io: { input: "base url, product id", output: "{value, read_at}" }, acceptance_hints: ["after reset with stock p2=7, reading p2 returns 7"] }),
+				call("capability_request", {
+					cap: CAP,
+					semantics: "read a product's current stock, repeatedly during a burst",
+					io: { input: "base url, product id", output: "{value, read_at}" },
+					acceptance_hints: ["after reset with stock p2=7, reading p2 returns 7"],
+				}),
 				call("mission_submit", {
 					status: "completed",
 					summary: "REST/JSON order service with shared stock; POST /reset available",
@@ -157,11 +263,31 @@ describe("M2: templates, capabilities, progressive disclosure", () => {
 				}),
 			],
 			toolsmith: [
-				(ctx) => fauxAssistantMessage(fauxToolCall("write", { path: join(ctx.info.runDir as string, "quarantine", "stock-read", "SKILL.md"), content: SKILL_MD })),
-				(ctx) => fauxAssistantMessage(fauxToolCall("write", { path: join(ctx.info.runDir as string, "quarantine", "stock-read", "read.mjs"), content: READ_MJS })),
+				(ctx) =>
+					fauxAssistantMessage(
+						fauxToolCall("write", {
+							path: join(ctx.info.runDir as string, "quarantine", "stock-read", "SKILL.md"),
+							content: SKILL_MD,
+						}),
+					),
+				(ctx) =>
+					fauxAssistantMessage(
+						fauxToolCall("write", {
+							path: join(ctx.info.runDir as string, "quarantine", "stock-read", "read.mjs"),
+							content: READ_MJS,
+						}),
+					),
 				call("skill_validate", { path: "quarantine/stock-read" }),
-				call("provider_register", { path: "quarantine/stock-read", cap: CAP, semantics: "read a product's current stock" }),
-				call("mission_submit", { status: "completed", summary: "stock-read skill registered", claims: [{ id: "o1", type: "observation", statement: "registered stock-read" }] }),
+				call("provider_register", {
+					path: "quarantine/stock-read",
+					cap: CAP,
+					semantics: "read a product's current stock",
+				}),
+				call("mission_submit", {
+					status: "completed",
+					summary: "stock-read skill registered",
+					claims: [{ id: "o1", type: "observation", statement: "registered stock-read" }],
+				}),
 			],
 			"verifier:conformance": [
 				(ctx) =>
@@ -178,16 +304,28 @@ process.exit(out.value === 7 ? 0 : 1);
 				call("test_run", { command: "node conf.mjs" }),
 				(ctx) => {
 					const id = idFrom(ctx.lastToolResult(), "tr");
-					return fauxAssistantMessage(fauxToolCall("mission_submit", { status: "completed", summary: "reads known values", claims: [{ id: "k1", type: "pass", statement: "returns the reset stock", test_run_ids: [id] }] }));
+					return fauxAssistantMessage(
+						fauxToolCall("mission_submit", {
+							status: "completed",
+							summary: "reads known values",
+							claims: [{ id: "k1", type: "pass", statement: "returns the reset stock", test_run_ids: [id] }],
+						}),
+					);
 				},
 			],
-			executor: [...executorScript("p1", { explore: true, template: () => "tpl://global/oracle.conservation-invariant" }), ...executorScript("p5", { explore: false, template: () => projectTpl })],
+			executor: [
+				...executorScript("p1", { explore: true, template: () => "tpl://global/oracle.conservation-invariant" }),
+				...executorScript("p5", { explore: false, template: () => projectTpl }),
+			],
 			verifier: verifierScript,
 			curator: [
 				call("template_propose", {
 					name: "concurrency.oversell-invariant",
 					type: "strategy",
-					card: { title: "Oversell under concurrent writes", summary: "Burst same-key writes and check the conservation invariant with state snapshots." },
+					card: {
+						title: "Oversell under concurrent writes",
+						summary: "Burst same-key writes and check the conservation invariant with state snapshots.",
+					},
 					intent_patterns: ["超卖", "并发下单", "库存为负", "oversell"],
 					hypothesis: "concurrent writes to one resource lack mutual exclusion",
 					stimulus: "N concurrent orders on one product (N ≈ 3 × stock)",
@@ -197,11 +335,19 @@ process.exit(out.value === 7 ? 0 : 1);
 						{ do: "burst N orders", expect: "some 201, some 409" },
 						{ do: "snapshot the stock again", expect: "readable" },
 					],
-					verdict: { fail_when: "invariant violated", pass_when: "invariant holds in all runs", inconclusive_when: "stock unreadable" },
+					verdict: {
+						fail_when: "invariant violated",
+						pass_when: "invariant holds in all runs",
+						inconclusive_when: "stock unreadable",
+					},
 					composes: [{ slot: "oracle", ref: "tpl://global/oracle.conservation-invariant" }],
 					body: "Snapshot with the bound state reader before and after; expected values come from the invariant.",
 				}),
-				call("mission_submit", { status: "completed", summary: "drafted", claims: [{ id: "t1", type: "observation", statement: "drafted template" }] }),
+				call("mission_submit", {
+					status: "completed",
+					summary: "drafted",
+					claims: [{ id: "t1", type: "observation", statement: "drafted template" }],
+				}),
 			],
 		};
 		const router = createRouter(p.agentDir, scripts);
@@ -216,7 +362,12 @@ process.exit(out.value === 7 ? 0 : 1);
 				createTestmodeExtension({
 					agentDir: p.agentDir,
 					modelRuntime: router.runtime,
-					orchestrator: { noSandbox: true, notifyDebounceMs: 50, heartbeatMs: 200, missionSettings: { retry: { enabled: false } } },
+					orchestrator: {
+						noSandbox: true,
+						notifyDebounceMs: 50,
+						heartbeatMs: 200,
+						missionSettings: { retry: { enabled: false } },
+					},
 					onOrchestrator: (o) => (orch = o),
 				}),
 			],
@@ -237,8 +388,14 @@ process.exit(out.value === 7 ? 0 : 1);
 
 		await s.prompt("/test");
 		await s.prompt("测一下 canary 的下单接口在并发下会不会超卖");
-		await waitFor(() => getIntent(p.store, i1)?.status === "closed" && router.remaining("main") === 5 && !s.isStreaming, 60_000);
-		await waitFor(() => listMissions(p.store, { intentId: i1 }).find((m) => m.role === "curator")?.status === "completed", 30_000);
+		await waitFor(
+			() => getIntent(p.store, i1)?.status === "closed" && router.remaining("main") === 5 && !s.isStreaming,
+			60_000,
+		);
+		await waitFor(
+			() => listMissions(p.store, { intentId: i1 }).find((m) => m.role === "curator")?.status === "completed",
+			30_000,
+		);
 
 		// Acceptance 1: H0, one draft template, a verified capability.
 		expect(listRetrievals(p.store, i1)[0].hitLevel).toBe("H0");
@@ -252,7 +409,10 @@ process.exit(out.value === 7 ? 0 : 1);
 		expect(listGaps(p.store, { capId: CAP })[0].status).toBe("resolved");
 
 		await s.prompt("看看 canary 的 p5 商品在并发下单时会不会超卖");
-		await waitFor(() => getIntent(p.store, i2)?.status === "closed" && router.remaining("main") === 0 && !s.isStreaming, 60_000);
+		await waitFor(
+			() => getIntent(p.store, i2)?.status === "closed" && router.remaining("main") === 0 && !s.isStreaming,
+			60_000,
+		);
 
 		// Acceptance 2: H2 reuse of the template and capability, at ≤50% of the first run's cost.
 		expect(listRetrievals(p.store, i2)[0].hitLevel).toBe("H2");
@@ -276,14 +436,19 @@ process.exit(out.value === 7 ? 0 : 1);
 			expect(text).not.toContain("stock-read");
 			expect(text).not.toContain("process.argv.slice(2)");
 		}
-		for (const actor of ["scout", "toolsmith", "executor", "verifier", "curator"]) for (const text of sys(actor)) expect(text).not.toContain(SECRET);
+		for (const actor of ["scout", "toolsmith", "executor", "verifier", "curator"])
+			for (const text of sys(actor)) expect(text).not.toContain(SECRET);
 		expect(sys("executor").every((t) => t.includes("stock-read"))).toBe(true);
 		expect(sys("scout").some((t) => t.includes("stock-read"))).toBe(false);
 
 		// Acceptance 4: a changed skill is blocked at next use and audited.
 		appendFileSync(join(provider.location.path as string, "read.mjs"), "\n// tampered\n");
 		insertIntent(p.store, "i-tamper", "r", intentIR("r"));
-		const [outcome] = await (orch as Orchestrator).dispatch("i-tamper", [{ role: "executor", objective: "o", targets: [canary.url], testKinds: ["functional"], capabilities: [CAP] }], router.model());
+		const [outcome] = await (orch as Orchestrator).dispatch(
+			"i-tamper",
+			[{ role: "executor", objective: "o", targets: [canary.url], testKinds: ["functional"], capabilities: [CAP] }],
+			router.model(),
+		);
 		expect(outcome).toMatchObject({ ok: false });
 		expect(!outcome.ok && outcome.reason).toMatch(/content hash changed/);
 		expect(getProvider(p.store, provider.sha256)?.trust).toBe("quarantined");

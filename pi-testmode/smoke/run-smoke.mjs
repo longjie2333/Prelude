@@ -33,7 +33,16 @@ const INTENTS = [
 mkdirSync(join(ROOT, ".pi", "testmode"), { recursive: true });
 writeFileSync(
 	join(ROOT, ".pi", "testmode", "scope.json"),
-	JSON.stringify({ project: "canary smoke", targets: [{ host: `localhost:${PORT}`, envs: ["local"], allowed: ["functional", "load"] }], data: { policy: "synthetic-only" }, egress_allowlist: [] }, null, 2),
+	JSON.stringify(
+		{
+			project: "canary smoke",
+			targets: [{ host: `localhost:${PORT}`, envs: ["local"], allowed: ["functional", "load"] }],
+			data: { policy: "synthetic-only" },
+			egress_allowlist: [],
+		},
+		null,
+		2,
+	),
 );
 const log = (line) => {
 	const s = `[${new Date().toISOString().slice(11, 19)}] ${line}`;
@@ -45,11 +54,15 @@ const canary = createCanary({ bugs: new Set(["B1", "B2", "B3"]) });
 await new Promise((r) => canary.listen(PORT, "127.0.0.1", r));
 log(`canary on :${PORT} (B1,B2,B3); project ${ROOT}; model ${PROVIDER}/${MODEL}`);
 
-const pi = spawn(process.execPath, [CLI, "--mode", "rpc", "--no-session", "-ne", "-e", PKG, "--provider", PROVIDER, "--model", MODEL], {
-	cwd: ROOT,
-	stdio: ["pipe", "pipe", "pipe"],
-	env: { ...process.env, NODE_NO_WARNINGS: "1" },
-});
+const pi = spawn(
+	process.execPath,
+	[CLI, "--mode", "rpc", "--no-session", "-ne", "-e", PKG, "--provider", PROVIDER, "--model", MODEL],
+	{
+		cwd: ROOT,
+		stdio: ["pipe", "pipe", "pipe"],
+		env: { ...process.env, NODE_NO_WARNINGS: "1" },
+	},
+);
 const send = (msg) => pi.stdin.write(`${JSON.stringify(msg)}\n`);
 pi.stderr.on("data", (b) => appendFileSync(join(OUT, "pi.stderr.log"), b));
 let exited = false;
@@ -71,7 +84,16 @@ createInterface({ input: pi.stdout }).on("line", (line) => {
 		if (ev.method === "notify") log(`notify: ${String(ev.message).slice(0, 300)}`);
 		if (["select", "confirm", "input", "editor"].includes(ev.method)) {
 			const opts = ev.options ?? [];
-			const answer = ev.method === "select" ? (opts.includes("Deny") ? { value: "Deny" } : opts.includes("Decide later") ? { value: "Decide later" } : { cancelled: true }) : ev.method === "confirm" ? { confirmed: false } : { cancelled: true };
+			const answer =
+				ev.method === "select"
+					? opts.includes("Deny")
+						? { value: "Deny" }
+						: opts.includes("Decide later")
+							? { value: "Decide later" }
+							: { cancelled: true }
+					: ev.method === "confirm"
+						? { confirmed: false }
+						: { cancelled: true };
 			dialogs.push({ method: ev.method, title: ev.title, answer });
 			log(`dialog ${ev.method}: ${String(ev.title).slice(0, 200)} → ${JSON.stringify(answer)}`);
 			send({ type: "extension_ui_response", id: ev.id, ...answer });
@@ -79,7 +101,11 @@ createInterface({ input: pi.stdout }).on("line", (line) => {
 	}
 	if (ev.type === "tool_execution_start") log(`main tool: ${ev.toolName}`);
 	if (ev.type === "message_end" && ev.message?.role === "assistant") {
-		const text = (ev.message.content ?? []).filter((c) => c.type === "text").map((c) => c.text).join(" ").trim();
+		const text = (ev.message.content ?? [])
+			.filter((c) => c.type === "text")
+			.map((c) => c.text)
+			.join(" ")
+			.trim();
 		if (text) log(`main says: ${text.slice(0, 400)}`);
 		if (ev.message.stopReason === "error") log(`main model error: ${ev.message.errorMessage}`);
 	}
@@ -122,7 +148,14 @@ async function waitIntent(k) {
 		if (Date.now() - quietSince > 180_000 && !nudged) {
 			nudged = true;
 			log("main idle with work pending: nudging once");
-			send({ type: "prompt", id: `nudge-${k}`, message: mine ? "All missions for the current intent have ended. Review the results and call report_finalize (or dispatch what is still missing)." : INTENTS[k], streamingBehavior: "followUp" });
+			send({
+				type: "prompt",
+				id: `nudge-${k}`,
+				message: mine
+					? "All missions for the current intent have ended. Review the results and call report_finalize (or dispatch what is still missing)."
+					: INTENTS[k],
+				streamingBehavior: "followUp",
+			});
 		}
 		if (Date.now() - quietSince > 420_000) return false;
 	}
@@ -146,6 +179,11 @@ await sleep(4000);
 pi.kill();
 canary.close();
 
-collect(OUT, { model: `${PROVIDER}/${MODEL}`, results, dialogs, minutes: Math.round((Date.now() - started) / 6000) / 10 });
+collect(OUT, {
+	model: `${PROVIDER}/${MODEL}`,
+	results,
+	dialogs,
+	minutes: Math.round((Date.now() - started) / 6000) / 10,
+});
 log(`done → ${OUT}`);
 process.exit(0);

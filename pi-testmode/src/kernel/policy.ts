@@ -130,12 +130,17 @@ function confinedToRunDir(command: string, ctx: PolicyContext): boolean {
 	if (ctx.mode !== "mission" || !ctx.runDir) return false;
 	const run = canonicalPath(ctx.runDir, ctx.cwd, ctx.home);
 	const inside = (p: string) => isInside(canonicalPath(p.replace(/^["']|["']$/g, ""), ctx.cwd, ctx.home), run);
-	const segments = command.split(/&&|;|\n/).map((s) => s.trim()).filter(Boolean);
+	const segments = command
+		.split(/&&|;|\n/)
+		.map((s) => s.trim())
+		.filter(Boolean);
 	let base = ctx.cwd;
 	for (const seg of segments) {
 		const words = seg.match(/"[^"]*"|'[^']*'|\S+/g) ?? [];
 		const [cmd, ...args] = words;
-		const paths = args.filter((w) => !w.startsWith("-")).map((w) => (/^([a-z]:|\/|~)/i.test(w.replace(/^["']/, "")) ? w : join(base, w.replace(/^["']|["']$/g, ""))));
+		const paths = args
+			.filter((w) => !w.startsWith("-"))
+			.map((w) => (/^([a-z]:|\/|~)/i.test(w.replace(/^["']/, "")) ? w : join(base, w.replace(/^["']|["']$/g, ""))));
 		if (cmd === "cd") {
 			if (paths.length !== 1 || !inside(paths[0])) return false;
 			base = paths[0].replace(/^["']|["']$/g, "");
@@ -158,12 +163,23 @@ function evaluateShell(command: string, ctx: PolicyContext, toolName: string): P
 	}
 	// Best effort: a command that names protected files and mutates something is refused outright.
 	const mentionsProtected = /scope\.json|\.db\b|\.sqlite\b/i.test(command);
-	if (mentionsProtected && (a.writeTargets.length > 0 || /\b(rm|mv|cp|sed\s+-i|sqlite3|truncate|Remove-Item|Set-Content|del)\b/i.test(command))) {
+	if (
+		mentionsProtected &&
+		(a.writeTargets.length > 0 ||
+			/\b(rm|mv|cp|sed\s+-i|sqlite3|truncate|Remove-Item|Set-Content|del)\b/i.test(command))
+	) {
 		return block("commands that modify scope.json or knowledge databases are blocked");
 	}
 
-	if (ctx.mode === "normal") return { action: "allow", tier: "R2", effect: a.readOnly ? "read_only" : "side_effecting", reason: "normal mode" };
-	if (ctx.mode === "testmode-main") return block("in test mode the main session does not run commands; dispatch a mission");
+	if (ctx.mode === "normal")
+		return {
+			action: "allow",
+			tier: "R2",
+			effect: a.readOnly ? "read_only" : "side_effecting",
+			reason: "normal mode",
+		};
+	if (ctx.mode === "testmode-main")
+		return block("in test mode the main session does not run commands; dispatch a mission");
 
 	for (const host of a.hosts) {
 		if (!isEgressAllowed(ctx.scope, host)) {
@@ -190,7 +206,12 @@ function evaluateShell(command: string, ctx: PolicyContext, toolName: string): P
 	let tier: RiskTier;
 	if (!a.readOnly && !a.mutatingHttp && a.hosts.length === 0 && confinedToRunDir(command, ctx)) {
 		// Only cd/mkdir/touch/read-only steps inside the mission's own run directory (seen in the real-model smoke run).
-		return { action: "allow", tier: "R0", effect: "idempotent", reason: "creates files only inside the run directory" };
+		return {
+			action: "allow",
+			tier: "R0",
+			effect: "idempotent",
+			reason: "creates files only inside the run directory",
+		};
 	}
 	if (a.readOnly) {
 		effect = "read_only";
@@ -233,10 +254,20 @@ function evaluateByAnnotations(toolName: string, ann: ToolAnnotations | undefine
 		tier = "R3";
 	}
 	if (ctx.mode === "testmode-main" && effect !== "read_only") {
-		return block(`in test mode the main session only uses read-only tools; ${toolName} is not read-only`, tier, effect);
+		return block(
+			`in test mode the main session only uses read-only tools; ${toolName} is not read-only`,
+			tier,
+			effect,
+		);
 	}
 	if (ctx.mode === "mission" && ctx.missionTier && higher(tier, ctx.missionTier)) {
-		return { action: "ask", tier, effect, reason: `${toolName} needs ${tier}; mission authorized at ${ctx.missionTier}`, subject: `tool:${toolName}` };
+		return {
+			action: "ask",
+			tier,
+			effect,
+			reason: `${toolName} needs ${tier}; mission authorized at ${ctx.missionTier}`,
+			subject: `tool:${toolName}`,
+		};
 	}
 	if (tier === "R4" && ctx.mode === "mission") {
 		return { action: "ask", tier, effect, reason: `${toolName} is marked destructive`, subject: `tool:${toolName}` };
@@ -256,7 +287,12 @@ export function evaluateToolCall(toolName: string, input: Record<string, unknown
 		if (typeof path !== "string" || !path) return block(`${toolName} without a path`);
 		const denial = writeDenial(ctx, path);
 		if (denial) return block(denial);
-		return { action: "allow", tier: "R0", effect: "idempotent", reason: ctx.mode === "mission" ? "write inside run directory" : "normal mode" };
+		return {
+			action: "allow",
+			tier: "R0",
+			effect: "idempotent",
+			reason: ctx.mode === "mission" ? "write inside run directory" : "normal mode",
+		};
 	}
 
 	if (SHELL_TOOLS.has(toolName)) {
@@ -284,7 +320,12 @@ export function evaluateToolCall(toolName: string, input: Record<string, unknown
 	if (toolName === "codemode") {
 		// Nested calls are gated and journaled individually; the script itself is unknown, so a crash
 		// inside it is treated as side-effecting.
-		return { action: "allow", tier: "R0", effect: "side_effecting", reason: "codemode script; nested calls gated individually" };
+		return {
+			action: "allow",
+			tier: "R0",
+			effect: "side_effecting",
+			reason: "codemode script; nested calls gated individually",
+		};
 	}
 
 	if (ctx.mode === "normal") return { action: "allow", tier: "R2", effect: "side_effecting", reason: "normal mode" };

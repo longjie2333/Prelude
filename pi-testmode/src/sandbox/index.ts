@@ -19,7 +19,13 @@ export interface MissionSandboxConfig {
 	filesystem: { denyRead: string[]; allowWrite: string[]; denyWrite: string[] };
 }
 
-export function sandboxConfigFor(opts: { scope?: Scope; targets: readonly string[]; runDir: string; agentDir: string; home?: string }): MissionSandboxConfig {
+export function sandboxConfigFor(opts: {
+	scope?: Scope;
+	targets: readonly string[];
+	runDir: string;
+	agentDir: string;
+	home?: string;
+}): MissionSandboxConfig {
 	const home = opts.home ?? homedir();
 	const domains = new Set<string>();
 	for (const h of opts.scope?.egress_allowlist ?? []) domains.add(h);
@@ -94,7 +100,8 @@ function sandboxedOps(mod: SandboxModule, config: MissionSandboxConfig): BashOpe
 						child.kill("SIGKILL");
 					}
 				};
-				const timer = timeout && timeout > 0 ? setTimeout(() => ((timedOut = true), kill()), timeout * 1000) : undefined;
+				const timer =
+					timeout && timeout > 0 ? setTimeout(() => ((timedOut = true), kill()), timeout * 1000) : undefined;
 				child.stdout?.on("data", onData);
 				child.stderr?.on("data", onData);
 				child.on("error", (err) => {
@@ -118,13 +125,20 @@ function sandboxedOps(mod: SandboxModule, config: MissionSandboxConfig): BashOpe
  * Replaces the mission's `bash` tool with a sandboxed one. Returns undefined when the platform
  * or runtime does not support it; the caller then reports tool-layer isolation only.
  */
-export async function missionSandboxExtension(cwd: string, config: MissionSandboxConfig): Promise<ExtensionFactory | undefined> {
+export async function missionSandboxExtension(
+	cwd: string,
+	config: MissionSandboxConfig,
+): Promise<ExtensionFactory | undefined> {
 	if (!(await ensureSandbox(config))) return undefined;
 	const mod = await loadSandbox();
 	if (!mod) return undefined;
 	return (pi) => {
 		const local = createBashTool(cwd);
 		const sandboxed = createBashTool(cwd, { operations: sandboxedOps(mod, config) });
-		pi.registerTool({ ...local, label: "bash (sandboxed)", execute: (id, params, signal, onUpdate) => sandboxed.execute(id, params, signal, onUpdate) });
+		pi.registerTool({
+			...local,
+			label: "bash (sandboxed)",
+			execute: (id, params, signal, onUpdate) => sandboxed.execute(id, params, signal, onUpdate),
+		});
 	};
 }

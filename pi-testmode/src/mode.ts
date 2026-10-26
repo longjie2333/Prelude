@@ -6,7 +6,13 @@
  * outside test mode; show running missions in the status bar.
  */
 import { join } from "node:path";
-import { type ExtensionAPI, type ExtensionContext, type ExtensionFactory, getAgentDir, ModelRuntime } from "@earendil-works/pi-coding-agent";
+import {
+	type ExtensionAPI,
+	type ExtensionContext,
+	type ExtensionFactory,
+	getAgentDir,
+	ModelRuntime,
+} from "@earendil-works/pi-coding-agent";
 
 /** Name of pi's MCP prompt section (extensions/mcp `MCP_SERVERS_SECTION`, not re-exported from the package root). */
 const MCP_SERVERS_SECTION = "mcp_servers";
@@ -18,7 +24,13 @@ import { policyExtension } from "./kernel/policy-extension.ts";
 import { loadScope } from "./kernel/scope.ts";
 import { MISSION_DONE, Orchestrator, type OrchestratorOptions } from "./orchestrator/orchestrator.ts";
 import questionnaire from "./orchestrator/questionnaire.ts";
-import { createIntentRecordTool, createKnowledgeSearchTool, createMissionDispatchTool, createMissionStatusTool, createReportFinalizeTool } from "./orchestrator/tools.ts";
+import {
+	createIntentRecordTool,
+	createKnowledgeSearchTool,
+	createMissionDispatchTool,
+	createMissionStatusTool,
+	createReportFinalizeTool,
+} from "./orchestrator/tools.ts";
 import { calibrate } from "./learning/calibration.ts";
 import { garden } from "./learning/gardener.ts";
 import { renderKb, renderWhy } from "./learning/inspect.ts";
@@ -31,7 +43,18 @@ const STATE_ENTRY = "testmode-state";
 const CUSTOM_PREFIX = "testmode-";
 
 /** Active tools of the main session in test mode (plan §7, I-6: no bash/edit/write). */
-export const TESTMODE_TOOLS = ["read", "grep", "find", "ls", "questionnaire", "intent_record", "knowledge_search", "mission_dispatch", "mission_status", "report_finalize"];
+export const TESTMODE_TOOLS = [
+	"read",
+	"grep",
+	"find",
+	"ls",
+	"questionnaire",
+	"intent_record",
+	"knowledge_search",
+	"mission_dispatch",
+	"mission_status",
+	"report_finalize",
+];
 
 export const TESTMODE_SECTION = `<testmode>
 Test mode is active. You are the orchestrator of a testing agent. You do five things only: understand the test intent, analyze the situation, plan missions, dispatch them, and summarize results. You never execute tests yourself; you have no shell and cannot write files.
@@ -82,7 +105,11 @@ export function createTestmodeExtension(options: TestmodeOptions = {}): Extensio
 				store,
 				modelRuntime:
 					options.modelRuntime ??
-					(() => (runtime ??= ModelRuntime.create({ authPath: join(agentDir(), "auth.json"), modelsPath: join(agentDir(), "models.json") }))),
+					(() =>
+						(runtime ??= ModelRuntime.create({
+							authPath: join(agentDir(), "auth.json"),
+							modelsPath: join(agentDir(), "models.json"),
+						}))),
 				...options.orchestrator,
 			});
 			orchestrator.recoverOnStartup();
@@ -96,14 +123,19 @@ export function createTestmodeExtension(options: TestmodeOptions = {}): Extensio
 				notify: (content, details) => {
 					if (!enabled) return false; // delivered on re-entry: outside test mode the message would be filtered out
 					try {
-						pi.sendMessage({ customType: MISSION_DONE, content, display: true, details }, { triggerTurn: true, deliverAs: "followUp" });
+						pi.sendMessage(
+							{ customType: MISSION_DONE, content, display: true, details },
+							{ triggerTurn: true, deliverAs: "followUp" },
+						);
 						setTimeout(() => updateStatus(), 0);
 						return true;
 					} catch {
 						return false;
 					}
 				},
-				ui: ctx.hasUI ? { select: (title, opts) => ctx.ui.select(title, opts), confirm: (t, m) => ctx.ui.confirm(t, m) } : undefined,
+				ui: ctx.hasUI
+					? { select: (title, opts) => ctx.ui.select(title, opts), confirm: (t, m) => ctx.ui.confirm(t, m) }
+					: undefined,
 			});
 			return o;
 		};
@@ -114,7 +146,10 @@ export function createTestmodeExtension(options: TestmodeOptions = {}): Extensio
 			try {
 				if (!enabled) return ctx.ui.setStatus("testmode", undefined);
 				const n = orchestrator?.runningCount() ?? 0;
-				ctx.ui.setStatus("testmode", ctx.ui.theme.fg(n > 0 ? "accent" : "warning", n > 0 ? `🧪 test · ${n} running` : "🧪 test"));
+				ctx.ui.setStatus(
+					"testmode",
+					ctx.ui.theme.fg(n > 0 ? "accent" : "warning", n > 0 ? `🧪 test · ${n} running` : "🧪 test"),
+				);
 			} catch {
 				// stale context after session replacement
 			}
@@ -125,7 +160,10 @@ export function createTestmodeExtension(options: TestmodeOptions = {}): Extensio
 		const offerParked = async (ctx: ExtensionContext, o: Orchestrator, parked: MissionRow[]) => {
 			if (parked.length === 0) return;
 			if (!ctx.hasUI) {
-				ctx.ui.notify(`${parked.length} mission(s) need a decision: ${parked.map((m) => `${m.id} (${m.status})`).join(", ")}. Run /test-missions.`, "warning");
+				ctx.ui.notify(
+					`${parked.length} mission(s) need a decision: ${parked.map((m) => `${m.id} (${m.status})`).join(", ")}. Run /test-missions.`,
+					"warning",
+				);
 				return;
 			}
 			for (const m of parked) {
@@ -140,7 +178,10 @@ export function createTestmodeExtension(options: TestmodeOptions = {}): Extensio
 						);
 						if (ok) r = await o.resumeMission(m.id, true);
 					}
-					ctx.ui.notify(`${m.id}: ${r.kind}${"reason" in r ? ` — ${r.reason}` : ""}`, r.kind === "failed" ? "error" : "info");
+					ctx.ui.notify(
+						`${m.id}: ${r.kind}${"reason" in r ? ` — ${r.reason}` : ""}`,
+						r.kind === "failed" ? "error" : "info",
+					);
 				} else if (choice === "Re-dispatch") {
 					ctx.ui.notify(`${m.id} re-dispatched as ${o.redispatch(m.id)}`, "info");
 				} else if (choice === "Abandon") {
@@ -171,7 +212,10 @@ export function createTestmodeExtension(options: TestmodeOptions = {}): Extensio
 		const toggle = async (ctx: ExtensionContext) => {
 			ctxRef = ctx;
 			await setEnabled(ctx, !enabled, { persist: true });
-			ctx.ui.notify(enabled ? "Test mode on: the main session plans and dispatches; missions run the tests." : "Test mode off.", "info");
+			ctx.ui.notify(
+				enabled ? "Test mode on: the main session plans and dispatches; missions run the tests." : "Test mode off.",
+				"info",
+			);
 		};
 
 		// ---------------------------------------------------------------- registration
@@ -186,7 +230,13 @@ export function createTestmodeExtension(options: TestmodeOptions = {}): Extensio
 				return paths;
 			},
 		};
-		for (const tool of [createIntentRecordTool(host), createKnowledgeSearchTool(host), createMissionDispatchTool(host), createMissionStatusTool(host), createReportFinalizeTool(host)]) {
+		for (const tool of [
+			createIntentRecordTool(host),
+			createKnowledgeSearchTool(host),
+			createMissionDispatchTool(host),
+			createMissionStatusTool(host),
+			createReportFinalizeTool(host),
+		]) {
 			pi.registerTool(tool);
 		}
 		questionnaire(pi);
@@ -249,7 +299,8 @@ export function createTestmodeExtension(options: TestmodeOptions = {}): Extensio
 		});
 
 		pi.registerCommand("test-why", {
-			description: "Explain why a template applies (or not) to the latest fingerprint, with its history: /test-why <tpl>",
+			description:
+				"Explain why a template applies (or not) to the latest fingerprint, with its history: /test-why <tpl>",
 			handler: async (args, ctx) => {
 				const o = ensureOrchestrator(ctx);
 				const id = args.trim();
@@ -259,20 +310,23 @@ export function createTestmodeExtension(options: TestmodeOptions = {}): Extensio
 		});
 
 		pi.registerCommand("test-promote", {
-			description: "Promote a stable project template to the global layer after its gate and your confirmation: /test-promote <tpl>",
+			description:
+				"Promote a stable project template to the global layer after its gate and your confirmation: /test-promote <tpl>",
 			handler: async (args, ctx) => {
 				const o = ensureOrchestrator(ctx);
 				const id = args.trim();
 				const check = promotionGate(o.store, id);
 				const summary = check.checks.map((c) => `${c.ok ? "✓" : "✗"} ${c.name}: ${c.detail}`).join("\n");
 				if (!check.ok) return ctx.ui.notify(`Not promotable:\n${summary}`, "warning");
-				if (!ctx.hasUI || !(await ctx.ui.confirm(`Promote ${id} to ${check.globalId}?`, summary))) return ctx.ui.notify("Promotion cancelled.", "info");
+				if (!ctx.hasUI || !(await ctx.ui.confirm(`Promote ${id} to ${check.globalId}?`, summary)))
+					return ctx.ui.notify("Promotion cancelled.", "info");
 				ctx.ui.notify(`Promoted as ${promote(o.store, id, check)} (candidate).`, "info");
 			},
 		});
 
 		pi.registerCommand("test-garden", {
-			description: "Offline consolidation: duplicates, exception folding, capacity, escape hatches, snapshot (--apply to commit through the gate)",
+			description:
+				"Offline consolidation: duplicates, exception folding, capacity, escape hatches, snapshot (--apply to commit through the gate)",
 			handler: async (args, ctx) => {
 				const o = ensureOrchestrator(ctx);
 				const r = garden(o.store, ensurePaths(ctx.cwd), { apply: args.includes("--apply") });
@@ -290,13 +344,18 @@ export function createTestmodeExtension(options: TestmodeOptions = {}): Extensio
 		});
 
 		pi.registerCommand("test-calibrate", {
-			description: "Precision/recall of confirmed defects against canary ground truth; drift pauses learning: /test-calibrate [bugs=B1,B2,B3] [hours=24]",
+			description:
+				"Precision/recall of confirmed defects against canary ground truth; drift pauses learning: /test-calibrate [bugs=B1,B2,B3] [hours=24]",
 			handler: async (args, ctx) => {
 				const o = ensureOrchestrator(ctx);
-				const bugs = (args.match(/bugs=([A-Z0-9,]+)/i)?.[1] ?? "B1,B2,B3").split(",").map((b) => b.trim().toUpperCase());
+				const bugs = (args.match(/bugs=([A-Z0-9,]+)/i)?.[1] ?? "B1,B2,B3")
+					.split(",")
+					.map((b) => b.trim().toUpperCase());
 				const hours = Number(args.match(/hours=(\d+)/)?.[1] ?? 24);
 				const since = new Date(Date.now() - hours * 3_600_000).toISOString();
-				const intents = o.store.all<{ id: string }>("SELECT id FROM intents WHERE status = 'closed' AND closed_at >= $t", { $t: since }).map((r) => r.id);
+				const intents = o.store
+					.all<{ id: string }>("SELECT id FROM intents WHERE status = 'closed' AND closed_at >= $t", { $t: since })
+					.map((r) => r.id);
 				const r = calibrate(o.store, intents, bugs);
 				ctx.ui.notify(
 					`precision ${r.precision.toFixed(2)}, recall ${r.recall.toFixed(2)} over ${intents.length} intent(s); found ${r.details.found.join(", ") || "none"}, missed ${r.details.missed.join(", ") || "none"}${r.drift ? `\nDRIFT: ${r.details.reasons.join("; ")}. Automatic learning is paused until a calibration without drift.` : ""}`,
@@ -307,7 +366,10 @@ export function createTestmodeExtension(options: TestmodeOptions = {}): Extensio
 
 		pi.registerMessageRenderer(MISSION_DONE, (message, { outputPad }, theme) => {
 			const box = new Box(outputPad, 1, (t) => theme.bg("customMessageBg", t));
-			const text = typeof message.content === "string" ? message.content : message.content.map((c) => ("text" in c ? c.text : "")).join("\n");
+			const text =
+				typeof message.content === "string"
+					? message.content
+					: message.content.map((c) => ("text" in c ? c.text : "")).join("\n");
 			box.addChild(new Text(theme.fg("accent", text), 0, 0));
 			return box;
 		});
@@ -355,7 +417,9 @@ export function createTestmodeExtension(options: TestmodeOptions = {}): Extensio
 		pi.on("context", (event) => {
 			if (enabled) return undefined;
 			return {
-				messages: event.messages.filter((m) => !((m as { customType?: string }).customType ?? "").startsWith(CUSTOM_PREFIX)),
+				messages: event.messages.filter(
+					(m) => !((m as { customType?: string }).customType ?? "").startsWith(CUSTOM_PREFIX),
+				),
 			};
 		});
 	};

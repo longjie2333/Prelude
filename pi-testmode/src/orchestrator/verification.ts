@@ -1,5 +1,11 @@
 /** Joins executor claims with the verdict of their auto-dispatched verifier (plan M1-10). */
-import { type Claim, type Envelope, expectedVerdict, type VerificationResult, verifyClaim } from "../missions/envelope.ts";
+import {
+	type Claim,
+	type Envelope,
+	expectedVerdict,
+	type VerificationResult,
+	verifyClaim,
+} from "../missions/envelope.ts";
 import type { Store } from "../store/db.ts";
 import { listMissions, listTestRuns, type MissionRow } from "../store/repos.ts";
 import { TERMINAL_STATUSES } from "../types.ts";
@@ -31,8 +37,10 @@ export function claimViews(store: Store, m: MissionRow): ClaimView[] {
 	const vEnv = verifier?.envelope as Envelope | null | undefined;
 	const vRuns = verifier ? listTestRuns(store, verifier.id) : [];
 	return env.claims.map((claim) => {
-		if (!expectedVerdict(claim.type) || m.role !== "executor") return { missionId: m.id, claim, status: "not_applicable", verifierRunIds: [] };
-		if (!verifier) return { missionId: m.id, claim, status: "unverified", verifierRunIds: [], note: "no verifier ran" };
+		if (!expectedVerdict(claim.type) || m.role !== "executor")
+			return { missionId: m.id, claim, status: "not_applicable", verifierRunIds: [] };
+		if (!verifier)
+			return { missionId: m.id, claim, status: "unverified", verifierRunIds: [], note: "no verifier ran" };
 		if (!TERMINAL_STATUSES.includes(verifier.status) && verifier.status !== "blocked") {
 			return { missionId: m.id, claim, status: "pending", verifierId: verifier.id, verifierRunIds: [] };
 		}
@@ -41,7 +49,11 @@ export function claimViews(store: Store, m: MissionRow): ClaimView[] {
 		const runs = vRuns.filter((r) => cited.has(r.id));
 		const status = runs.length > 0 ? verifyClaim(claim.type, runs) : "inconclusive";
 		const note =
-			runs.length > 0 ? entry?.note : verifier.status === "completed" ? "verifier cited no test_run for this claim" : `verifier ${verifier.status}`;
+			runs.length > 0
+				? entry?.note
+				: verifier.status === "completed"
+					? "verifier cited no test_run for this claim"
+					: `verifier ${verifier.status}`;
 		return { missionId: m.id, claim, status, verifierId: verifier.id, verifierRunIds: runs.map((r) => r.id), note };
 	});
 }
