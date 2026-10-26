@@ -176,15 +176,16 @@ pi-testmode/
 ├── src/
 │   ├── index.ts             # 入口：注册模式、命令、工具、钩子
 │   ├── mode.ts              # 测试模式（改编自 plan-mode）
-│   ├── orchestrator/        # 主会话元工具：intent_record / knowledge_search / mission_dispatch / mission_status / report_finalize
-│   ├── missions/            # runner.ts（MissionRunner 接口 + createAgentSession 实现）、recovery.ts、journal.ts、envelope.ts、roles/*.md
-│   ├── kernel/              # policy.ts（闸门）、risk.ts、scope.ts、approvals.ts、budget.ts、audit.ts
+│   ├── paths.ts / types.ts / util.ts   # 运行时目录、共享类型、哈希与 id 等工具函数
+│   ├── orchestrator/        # 主会话元工具（tools.ts）、编排器（派发、复验、一致性评分）、intent、questionnaire、report、verification
+│   ├── missions/            # runner.ts（MissionRunner 接口 + createAgentSession 实现）、recovery.ts、envelope.ts、roles.ts、roles/*.md
+│   ├── kernel/              # policy.ts（规则）、policy-extension.ts（闸门、审计、副作用日志）、command.ts、paths.ts、risk.ts、scope.ts、approvals.ts、budget.ts
 │   ├── sandbox/             # 改编自官方 sandbox 示例
-│   ├── harness/             # test_run、artifact_freeze、evidence（内容寻址）
-│   ├── store/               # db.ts、migrations/*.sql、repos/*.ts
-│   ├── knowledge/           # schema.ts（TypeBox）、applicability.ts、retrieval.ts、render.ts、seeds/
-│   ├── capabilities/        # registry.ts、skill-validate.ts、conformance.ts、mcp-bind.ts
-│   └── learning/            # evaluator、triage、attributor、curator、gate、gardener、calibration
+│   ├── harness/             # tools.ts（test_run、artifact_freeze）、process.ts、evidence.ts（内容寻址）
+│   ├── store/               # db.ts、repos.ts（M1 表，含 audit 与 tool_journal）、migrations/{project,global}/*.sql
+│   ├── knowledge/           # schema.ts（TypeBox）、store.ts（知识表）、applicability.ts、fingerprint.ts、retrieval.ts、render.ts、seeds/
+│   ├── capabilities/        # registry.ts、skill-validate.ts、mcp-bind.ts、tools.ts
+│   └── learning/            # evaluator、triage、attributor、curator、delta、gate、stats、lifecycle、gardener、calibration、promote、pipeline
 ├── canary/                  # 靶场 SUT（node:http，零依赖），见 M1-12
 └── test/                    # vitest：unit/ 和 e2e/（fauxProvider）
 ```

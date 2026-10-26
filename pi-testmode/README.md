@@ -2,7 +2,7 @@
 
 A pi extension that turns a pi session into a testing orchestrator. In test mode you state a test intent in plain language; the main session records it, looks up matching test templates, dispatches missions that run in isolated in-process sub-sessions, goes idle, and is woken when results arrive. Defects count only after an independent verifier reproduces them. Every run feeds back into the template graph: templates are reinforced, gain exceptions instead of being rewritten, and new capabilities are acquired, verified, and hash-locked. Design: [../docs/agent-core.md](../docs/agent-core.md); plan: [../docs/pi-testmode-plan.md](../docs/pi-testmode-plan.md).
 
-Status: milestones M1–M3 implemented and covered by faux-model tests. Not yet run against a real model.
+Status: milestones M1–M3 implemented and covered by faux-model tests. Real-model runs against the canary and their open issues: [../docs/runs/](../docs/runs/2026-10-26-canary-deepseek/README.md).
 
 ## Use
 
@@ -52,6 +52,7 @@ On macOS and Linux, missions' `bash` runs inside `@anthropic-ai/sandbox-runtime`
 
 ```bash
 npm run typecheck
+npm run format           # Biome, formatter only
 npm test                 # unit + e2e (faux provider, no network or credentials), ~1 min
 ```
 
