@@ -61,7 +61,7 @@ const DispatchParams = Type.Object({
 			budget: Type.Optional(
 				Type.Object(
 					{ tokens: Type.Optional(Type.Number()), wall_clock_s: Type.Optional(Type.Number()) },
-					{ description: "Usually omit. Tokens count the whole context on every turn; values below half the role default are raised to it." },
+					{ description: "Usually omit. Tokens are new tokens (context growth plus output, not the resent context); values below half the role default are raised to it." },
 				),
 			),
 			template_ids: Type.Optional(Type.Array(Type.String(), { description: "Template ids from knowledge_search cards to activate in this mission" })),

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { verdictFor } from "../../src/harness/tools.ts";
+import { conformanceScore } from "../../src/orchestrator/orchestrator.ts";
 import { BudgetTracker } from "../../src/kernel/budget.ts";
-import { type Claim, validateClaimsAgainstRuns, verifyClaim } from "../../src/missions/envelope.ts";
+import { type Claim, EnvelopeSchema, validateClaimsAgainstRuns, verifyClaim } from "../../src/missions/envelope.ts";
 import { parseRoleFile, renderMissionSpec, roleTools } from "../../src/missions/roles.ts";
 import type { TestRunRow } from "../../src/store/repos.ts";
 
@@ -34,6 +35,12 @@ describe("claims need test_run verdicts", () => {
 		expect(validateClaimsAgainstRuns([{ id: "o1", type: "observation", statement: "x" }], [], "m-1")).toEqual([]);
 	});
 
+	it("tells the verifier that integrity_issues voids feedback and must stay empty without a real issue", () => {
+		const d = (EnvelopeSchema.properties.integrity_issues as { description?: string }).description ?? "";
+		expect(d).toMatch(/voids/);
+		expect(d).toMatch(/Omit the field/);
+	});
+
 	it("verifies deterministically from the verifier's runs", () => {
 		expect(verifyClaim("defect", [run("a", "fail"), run("b", "fail")])).toBe("confirmed");
 		expect(verifyClaim("defect", [run("a", "pass")])).toBe("refuted");
@@ -47,6 +54,15 @@ describe("claims need test_run verdicts", () => {
 	});
 });
 
+describe("conformanceScore", () => {
+	it("scores the cited runs, not the verifier's fault probes", () => {
+		const runs = [run("ok1", "pass"), run("ok2", "pass"), run("probe1", "fail"), run("probe2", "fail")];
+		const env = { status: "completed", summary: "s", claims: [{ id: "k1", type: "pass", statement: "conforms", test_run_ids: ["ok1", "ok2"] }] } as never;
+		expect(conformanceScore(env, runs)).toEqual({ passed: 2, decided: 2, score: 1 });
+		expect(conformanceScore({ status: "completed", summary: "s", claims: [] } as never, runs).score).toBe(0.5);
+	});
+});
+
 describe("verdictFor", () => {
 	it("maps exit codes; unrunnable commands and timeouts are not verdicts", () => {
 		expect(verdictFor({ exitCode: 0, timedOut: false, aborted: false }).verdict).toBe("pass");
@@ -57,23 +73,46 @@ describe("verdictFor", () => {
 	});
 });
 
-describe("budget", () => {
-	it("warns once at 80% and stops at 100%", () => {
+describe("budget (new tokens, I-28)", () => {
+	it("counts prompt growth and output, not the resent context", () => {
+		const b = new BudgetTracker({ tokens: 10_000, wallClockMs: 60_000 }, undefined, 0);
+		b.addUsage({ input: 4000, output: 200 }); // system prompt + task: all new
+		b.addUsage({ input: 500, cacheRead: 4200, output: 100 }); // 500 new tool-result tokens on a 4200 cached prefix
+		b.addUsage({ input: 300, cacheRead: 4800, output: 100 });
+		const c = b.snapshot(1);
+		expect(c.tokens).toBe(4200 + 600 + 400);
+		expect(c.processed).toBe(4200 + 4800 + 5200);
+		expect(c.context).toBe(5200);
+	});
+
+	it("after compaction measures growth from the smaller prompt", () => {
+		const b = new BudgetTracker({ tokens: 1e6, wallClockMs: 60_000 }, undefined, 0);
+		b.addUsage({ input: 20_000, output: 0 });
+		b.addUsage({ input: 3000, output: 100 }); // compacted: no growth, only the output is new
+		b.addUsage({ input: 3600, output: 0 }); // 500 new tokens beyond 3000 + 100
+		expect(b.snapshot(1).tokens).toBe(20_000 + 100 + 500);
+	});
+
+	it("warns once at 80% and is exceeded at 100%; wall clock counts too", () => {
 		const b = new BudgetTracker({ tokens: 1000, wallClockMs: 60_000 }, undefined, 0);
-		b.addUsage({ input: 500, output: 200, totalTokens: 700 });
+		b.addUsage({ input: 600, output: 100 });
 		expect(b.state(1)).toBe("ok");
-		b.addUsage({ input: 100, output: 50, totalTokens: 150 });
+		b.addUsage({ input: 800, output: 50 }); // +100 growth +50 output → 850
 		expect(b.shouldWarn(1)).toBe(true);
 		expect(b.shouldWarn(1)).toBe(false);
-		b.addUsage({ totalTokens: 200 });
+		b.addUsage({ input: 1000, output: 100 }); // +150 +100 → 1100
 		expect(b.state(1)).toBe("exceeded");
 		expect(new BudgetTracker({ tokens: 1e9, wallClockMs: 1000 }, undefined, 0).state(1500)).toBe("exceeded");
 	});
 
-	it("carries spent cost across a resume", () => {
-		const b = new BudgetTracker({ tokens: 1000, wallClockMs: 60_000 }, { tokens: 900, input: 0, output: 0, costUsd: 0, wallClockMs: 1000, turns: 3 }, 10_000);
+	it("carries spent cost and the context base across a resume (and reads pre-I-28 rows)", () => {
+		const b = new BudgetTracker({ tokens: 1000, wallClockMs: 60_000 }, { tokens: 900, processed: 5000, input: 4000, output: 1000, costUsd: 0, wallClockMs: 1000, turns: 3, context: 2000 }, 10_000);
 		expect(b.state(10_000)).toBe("warn");
 		expect(b.snapshot(10_000).wallClockMs).toBe(1000);
+		b.addUsage({ input: 2050, output: 0 });
+		expect(b.snapshot(10_000).tokens).toBe(950);
+		const legacy = new BudgetTracker({ tokens: 1000, wallClockMs: 60_000 }, { tokens: 10, input: 0, output: 0, costUsd: 0, wallClockMs: 0, turns: 1 } as never, 0);
+		expect(legacy.snapshot(0)).toMatchObject({ processed: 0, context: 0 });
 	});
 });
 

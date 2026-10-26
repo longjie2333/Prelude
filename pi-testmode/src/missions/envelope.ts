@@ -59,7 +59,8 @@ export const EnvelopeSchema = Type.Object({
 	),
 	integrity_issues: Type.Optional(
 		Type.Array(Type.String(), {
-			description: "Verifier: signs a test cannot fail, skips its own assertions, or takes expected values from the SUT's current output",
+			description:
+				"Verifier only, and only when you found one: a test that cannot fail, skips its own assertions, or takes expected values from the SUT's current output. Each entry voids the executor's feedback. Omit the field (or leave it empty) when there are none; put caveats and minor notes in claims or deviations instead.",
 		}),
 	),
 	oracle_checks: Type.Optional(

@@ -1,4 +1,12 @@
-/** Mission budget accounting (plan M1-8): warn at 80%, stop at 100%. */
+/**
+ * Mission budget accounting (plan M1-8, decision I-28): warn at 80%, ask for submission at 100%.
+ *
+ * Every turn resends the whole conversation, so summing prompt tokens counts the same context
+ * again on each turn (8–13× over in the 2026-10-26 smoke run). The budget instead counts new
+ * tokens: how much the prompt grew beyond the previous prompt plus its output (new tool results,
+ * steering, a compaction summary), plus the tokens the model generates. `processed` keeps the
+ * billed total for cost reporting.
+ */
 import type { Budget, Cost } from "../types.ts";
 import { EMPTY_COST } from "../types.ts";
 
@@ -20,22 +28,27 @@ export class BudgetTracker {
 
 	readonly budget: Budget;
 
-	constructor(budget: Budget, previous: Cost = EMPTY_COST, now = Date.now()) {
+	constructor(budget: Budget, previous: Partial<Cost> = EMPTY_COST, now = Date.now()) {
 		this.budget = budget;
-		this.cost = { ...previous };
+		// Rows written before I-28 lack the new fields.
+		this.cost = { ...EMPTY_COST, ...previous };
 		// Resumed missions keep the wall clock they already spent.
-		this.startedAt = now - previous.wallClockMs;
+		this.startedAt = now - this.cost.wallClockMs;
 	}
 
 	addUsage(usage: UsageLike | undefined): void {
 		if (!usage) return;
-		const input = (usage.input ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
+		const prompt = (usage.input ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
 		const output = usage.output ?? 0;
-		this.cost.input += input;
+		// After compaction the prompt shrinks: growth is measured from the smaller prompt onwards.
+		const growth = Math.max(0, prompt - this.cost.context);
+		this.cost.tokens += growth + output;
+		this.cost.processed += prompt + output;
+		this.cost.input += prompt;
 		this.cost.output += output;
-		this.cost.tokens += usage.totalTokens ?? input + output;
 		this.cost.costUsd += usage.cost?.total ?? 0;
 		this.cost.turns += 1;
+		this.cost.context = prompt + output;
 	}
 
 	snapshot(now = Date.now()): Cost {

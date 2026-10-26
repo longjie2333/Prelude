@@ -51,11 +51,14 @@ import type { IntentIR } from "./intent.ts";
 import { claimViews, needsVerification, verifierOf } from "./verification.ts";
 
 export const DEFAULT_BUDGETS: Record<Role, Budget> = {
-	scout: { tokens: 150_000, wallClockMs: 10 * 60_000 },
-	executor: { tokens: 400_000, wallClockMs: 30 * 60_000 },
-	verifier: { tokens: 200_000, wallClockMs: 15 * 60_000 },
-	toolsmith: { tokens: 300_000, wallClockMs: 20 * 60_000 },
-	curator: { tokens: 100_000, wallClockMs: 5 * 60_000 },
+	// New tokens (decision I-28). Sized from the 2026-10-26 smoke run, where missions used
+	// 11k–46k new tokens: roughly twice the observed maximum per role.
+	scout: { tokens: 60_000, wallClockMs: 10 * 60_000 },
+	executor: { tokens: 100_000, wallClockMs: 30 * 60_000 },
+	verifier: { tokens: 80_000, wallClockMs: 15 * 60_000 },
+	toolsmith: { tokens: 100_000, wallClockMs: 20 * 60_000 },
+	// Run 4 (2026-10-26): a curator with 40k spent it reading run files and never proposed.
+	curator: { tokens: 80_000, wallClockMs: 5 * 60_000 },
 };
 
 export const MISSION_DONE = "testmode-mission-done";
@@ -97,6 +100,20 @@ export interface DispatchRequest {
 export type DispatchOutcome =
 	| { ok: true; missionId: string; role: Role; tier: string; reasons: string[] }
 	| { ok: false; objective: string; reason: string };
+
+/**
+ * Conformance score over the runs the verifier's pass/defect claims cite. A verifier also runs
+ * fault probes that are meant to fail (its harness against a broken mock); counting every run
+ * rejected a provider that passed 47/47 checks in the 2026-10-26 smoke run. Without citations,
+ * every decided run counts.
+ */
+export function conformanceScore(env: Envelope | null, runs: readonly { id: string; verdict: string | null }[]): { passed: number; decided: number; score: number } {
+	const cited = new Set((env?.claims ?? []).filter((c) => c.type === "pass" || c.type === "defect").flatMap((c) => c.test_run_ids ?? []));
+	const pool = cited.size ? runs.filter((r) => cited.has(r.id)) : runs;
+	const decided = pool.filter((r) => r.verdict === "pass" || r.verdict === "fail");
+	const passed = decided.filter((r) => r.verdict === "pass").length;
+	return { passed, decided: decided.length, score: decided.length ? passed / decided.length : 0 };
+}
 
 export function isPidAlive(pid: number): boolean {
 	try {
@@ -477,9 +494,7 @@ export class Orchestrator {
 		const c = v.spec.conformance;
 		if (!c) return;
 		const env = v.envelope as Envelope | null;
-		const decided = listTestRuns(store, v.id).filter((r) => r.verdict === "pass" || r.verdict === "fail");
-		const passed = decided.filter((r) => r.verdict === "pass").length;
-		const score = decided.length ? passed / decided.length : 0;
+		const { passed, decided, score } = conformanceScore(env, listTestRuns(store, v.id));
 		const binding = bindingOf(store, c.providerSha, c.capId);
 		const intact = binding ? verifyBinding(binding) : { ok: false as const, reason: "provider missing" };
 		const ok = v.status === "completed" && !!env?.claims.some((x) => x.type === "pass") && !env.claims.some((x) => x.type === "defect") && score >= 0.9 && intact.ok;
@@ -491,7 +506,7 @@ export class Orchestrator {
 				actor: "main",
 				event: ok ? "provider_verified" : "provider_rejected",
 				decision: ok ? "verified" : "candidate",
-				reason: `${c.capId} ← ${c.providerName}@${c.providerSha.slice(0, 8)} conformance ${passed}/${decided.length}`,
+				reason: `${c.capId} ← ${c.providerName}@${c.providerSha.slice(0, 8)} conformance ${passed}/${decided}`,
 			});
 		});
 	}

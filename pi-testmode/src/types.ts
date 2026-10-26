@@ -44,12 +44,21 @@ export interface Budget {
 }
 
 export interface Cost {
+	/**
+	 * New tokens: what the model saw for the first time (prompt growth since the previous turn)
+	 * plus what it generated. Budgets are measured in these (decision I-28).
+	 */
 	tokens: number;
+	/** Every prompt + output token sent and received, resent context included (what providers bill). */
+	processed: number;
+	/** Prompt tokens, resent context included. */
 	input: number;
 	output: number;
 	costUsd: number;
 	wallClockMs: number;
 	turns: number;
+	/** Size of the last prompt plus its output: the base the next turn's growth is measured from. */
+	context: number;
 }
 
-export const EMPTY_COST: Cost = { tokens: 0, input: 0, output: 0, costUsd: 0, wallClockMs: 0, turns: 0 };
+export const EMPTY_COST: Cost = { tokens: 0, processed: 0, input: 0, output: 0, costUsd: 0, wallClockMs: 0, turns: 0, context: 0 };

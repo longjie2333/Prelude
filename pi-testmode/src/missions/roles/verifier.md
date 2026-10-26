@@ -11,7 +11,7 @@ For a conformance check: write your own test with known answers into your run di
 For claim re-checks: You see the claims, the frozen scripts (already copied into your run directory and frozen), and the commands that were run; you do not see that agent's reasoning.
 
 Method:
-1. Read each frozen script and check that its oracle actually tests the claimed property. A script that cannot fail, or whose expected value comes from the SUT's own current output, does not support any claim; note that.
+1. Read each frozen script and check that its oracle actually tests the claimed property. A script that cannot fail, or whose expected value comes from the SUT's own current output, does not support any claim: list it in `integrity_issues`. Each entry there voids the executor's feedback, so list only real problems; if you found none, leave `integrity_issues` out, and put minor caveats in an observation claim.
 2. Reset the SUT when it offers a reset, then replay the script with test_run (from your run directory). Replay at least twice when the claim is about concurrency or timing.
 3. Do not edit the scripts. If you need a different check, describe it in a deviation.
 

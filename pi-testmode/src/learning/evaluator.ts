@@ -59,9 +59,12 @@ export function detectCheating(s: Store, m: MissionRow): string[] {
 	}
 	const v0 = verifierOf(s, m.id);
 	const runs = [...listTestRuns(s, m.id), ...(v0 ? listTestRuns(s, v0.id) : [])];
-	for (const f of listFrozen(s, m.id)) {
-		if (!SCRIPT.test(f.path) || !existsSync(f.path)) continue;
-		const name = f.path.split(/[\\/]/).pop() as string;
+	const frozen = listFrozen(s, m.id).filter((f) => SCRIPT.test(f.path) && existsSync(f.path));
+	const nameOf = (p: string) => p.split(/[\\/]/).pop() as string;
+	// Only entry points need a way to fail; helper modules they import (lib.mjs, oracle.mjs) do not.
+	const invoked = frozen.filter((f) => runs.some((r) => r.command.toLowerCase().includes(nameOf(f.path))));
+	for (const f of invoked.length ? invoked : frozen) {
+		const name = nameOf(f.path);
 		// Evidence beats heuristics: a run of the script that exited non-zero proves it can fail.
 		if (runs.some((r) => r.command.toLowerCase().includes(name) && r.exitCode !== null && r.exitCode !== 0)) continue;
 		if (!ASSERTS.test(readFileSync(f.path, "utf8"))) out.push(`${name} has no way to fail (no assertion or non-zero exit)`);

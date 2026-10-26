@@ -30,24 +30,31 @@ export interface ReportResult {
 	cost: Cost;
 }
 
-function addCost(a: Cost, b: Cost): Cost {
+function addCost(a: Cost, b: Partial<Cost>): Cost {
+	const n = (k: keyof Cost) => a[k] + (b[k] ?? 0);
 	return {
-		tokens: a.tokens + b.tokens,
-		input: a.input + b.input,
-		output: a.output + b.output,
-		costUsd: a.costUsd + b.costUsd,
-		wallClockMs: a.wallClockMs + b.wallClockMs,
-		turns: a.turns + b.turns,
+		tokens: n("tokens"),
+		processed: n("processed"),
+		input: n("input"),
+		output: n("output"),
+		costUsd: n("costUsd"),
+		wallClockMs: n("wallClockMs"),
+		turns: n("turns"),
+		context: 0,
 	};
 }
 
+const fmt = (n: number) => n.toLocaleString("en-US");
+
 function fmtCost(c: Cost): string {
-	return `${c.tokens.toLocaleString("en-US")} tokens, $${c.costUsd.toFixed(4)}, ${(c.wallClockMs / 1000).toFixed(1)}s`;
+	return `${fmt(c.tokens)} new / ${fmt(c.processed)} processed tokens, $${c.costUsd.toFixed(4)}, ${(c.wallClockMs / 1000).toFixed(1)}s`;
 }
 
 export function intentCost(store: Store, intentId: string): Cost {
 	return listMissions(store, { intentId }).reduce((acc, m) => addCost(acc, m.cost), { ...EMPTY_COST });
 }
+
+const pct = (a: number, b: number) => (b > 0 ? `${Math.round((a / b) * 100)}%` : "n/a");
 
 /** Templates used, capabilities acquired, and cost against the run a reused template came from. */
 function knowledgeSection(store: Store, intentId: string, hitLevel: string | null, missions: MissionRow[]): string[] {
@@ -81,7 +88,9 @@ function knowledgeSection(store: Store, intentId: string, hitLevel: string | nul
 		if (!originId || originId === intentId) continue;
 		const before = intentCost(store, originId);
 		if (before.tokens > 0) {
-			out.push(`- cost vs. ${originId} (where ${tid} was distilled): ${now.tokens.toLocaleString("en-US")} vs ${before.tokens.toLocaleString("en-US")} tokens (${Math.round((now.tokens / before.tokens) * 100)}%)`);
+			out.push(
+				`- cost vs. ${originId} (where ${tid} was distilled): ${fmt(now.tokens)} vs ${fmt(before.tokens)} new tokens (${pct(now.tokens, before.tokens)}); ${fmt(now.processed)} vs ${fmt(before.processed)} processed (${pct(now.processed, before.processed)})`,
+			);
 		}
 	}
 	return out;

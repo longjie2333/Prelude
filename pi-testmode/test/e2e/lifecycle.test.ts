@@ -37,6 +37,8 @@ async function dispatchScout(o: Orchestrator, router: ReturnType<typeof createRo
 }
 
 const submit: Step = () => fauxAssistantMessage(fauxToolCall("mission_submit", { status: "completed", summary: "done", claims: [] }));
+/** A turn that adds ~2k genuinely new tokens (its own output) and keeps calling tools. */
+const chatter: Step = () => fauxAssistantMessage([fauxText(`thinking aloud ${"x".repeat(8000)}`), fauxToolCall("ls", { path: "." })]);
 
 describe("mission lifecycle", () => {
 	it("network loss after retries parks the mission as interrupted(network); it resumes later", async () => {
@@ -59,17 +61,18 @@ describe("mission lifecycle", () => {
 	});
 
 	it("a mission that blows its budget ends partial; requested budgets have a floor", async () => {
-		const chatter: Step = () => fauxAssistantMessage(fauxToolCall("ls", { path: "." }));
 		const { o, router } = orchestrator({ scout: Array.from({ length: 200 }, () => chatter) });
 		const id = await dispatchScout(o, router, { tokens: 2000 });
-		expect(getMission(p.store, id)?.budget.tokens).toBe(75_000); // half the scout default
+		expect(getMission(p.store, id)?.budget.tokens).toBe(30_000); // half the scout default
 		await waitFor(() => getMission(p.store, id)?.status === "partial", 60_000);
-		expect(getMission(p.store, id)?.error).toMatch(/budget/);
+		const m = getMission(p.store, id);
+		expect(m?.error).toMatch(/budget/);
+		// The budget counts new tokens; the processed total (resent context) is much larger.
+		expect(m?.cost.processed).toBeGreaterThan(2 * (m?.cost.tokens ?? 0));
 		await o.shutdown();
 	}, 90_000);
 
 	it("at 100% of the budget a mission may still submit; it is aborted only past the grace margin", async () => {
-		const chatter: Step = () => fauxAssistantMessage(fauxToolCall("ls", { path: "." }));
 		// The scout keeps calling ls until it is told the budget is exhausted, then submits.
 		const steps: Step[] = Array.from({ length: 200 }, () => (ctx) => (ctx.lastUserText().includes("Budget exhausted") ? submit(ctx) : chatter(ctx)));
 		const { o, router } = orchestrator({ scout: steps });
