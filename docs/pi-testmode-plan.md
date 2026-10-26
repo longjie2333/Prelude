@@ -163,6 +163,7 @@
 | I-24 | 新维度激活条件：有维度假设（attributor 双评判一致）、至少一次置信度 ≥0.7 的观察、至少两个不同取值。派发时把待验证维度（`facet.propose` 与悬置 `except` 涉及的维度）写入 Mission 的 `probe`，由执行者在 `fingerprint` 中报告 | "探测"由执行任务顺带完成，不必为每个假设单派 Scout |
 | I-25 | 触发的 `patch` 例外若指向模板，派发时把该模板一并激活；例外的支持度记在 `template_stats` 的 `exception:<id>` 行，不混入适用域内统计 | 例外结果才能被执行和计分（M3 验收 3）；B 类不污染 β |
 | I-26 | 晋升门禁的"≥2 个项目"在单库内以"基石覆盖 ≥2 个不同 SUT"近似；`/test-calibrate` 基于时间窗内已关闭的意图计算，不自动跑固定意图集；Gardener 的去重合并为确定性"弃用较弱者 + redirects_to"，不调 LLM 改写内容 | 单个 project.db 看不到其他项目（组织层不在范围）；保持门禁与整理全部可复现 |
+| I-27 | （真实模型冒烟运行后）复验以复现率 ≥0.6 判 confirmed；Mission 请求预算下限为角色默认值的一半，达到 100% 后仍可提交、125% 才中止；Mission 的 shell 调用超时上限 120 秒，整盘扫描列为危险命令；作弊检测以"有非零退出的运行"为准 | 见 [docs/runs/2026-10-26-canary-deepseek](runs/2026-10-26-canary-deepseek/README.md) 的问题 1–8 |
 
 ---
 

@@ -41,6 +41,8 @@ import { applyResolutions, recoveryNote, resolveOrphans } from "./recovery.ts";
 import { loadRole, renderMissionSpec, roleTools } from "./roles.ts";
 
 export const MAX_RESUMES = 2;
+/** Fraction of the budget at which a mission is aborted; between 1.0 and this it may only submit. */
+export const BUDGET_GRACE = 1.25;
 
 async function waitForTools<T>(get: () => T[], timeoutMs: number): Promise<T[]> {
 	const start = Date.now();
@@ -432,11 +434,19 @@ export class SdkMissionRunner implements MissionRunner {
 
 		const budget = new BudgetTracker(m.budget, m.cost);
 		let lastError: string | undefined;
+		let graceSteered = false;
 		const checkBudget = () => {
-			if (entry.abortReason) return;
-			if (budget.state() === "exceeded") {
+			if (entry.abortReason || entry.envelope) return;
+			// At 100% the mission gets one last chance to submit; it is aborted only past the grace margin
+			// (in the smoke run a scout was aborted in the same turn as its mission_submit and lost its findings).
+			if (budget.fraction() >= BUDGET_GRACE) {
 				entry.abortReason = "budget";
 				void session.abort();
+			} else if (budget.state() === "exceeded") {
+				if (!graceSteered) {
+					graceSteered = true;
+					void session.steer("[testmode] Budget exhausted. Call mission_submit now (status partial) with what you have; no other tool calls.").catch(() => undefined);
+				}
 			} else if (budget.shouldWarn()) {
 				void session
 					.steer("[testmode] Budget is 80% used. Wrap up now: finish the current check and call mission_submit with what you have.")

@@ -15,6 +15,19 @@ import { digest, errorMessage } from "../util.ts";
 import type { ApprovalOutcome, ApprovalRequest } from "./approvals.ts";
 import { evaluateToolCall, type PolicyContext } from "./policy.ts";
 
+/** Upper bound for a mission's bash/powershell call; long checks belong in test_run (own timeout). */
+export const MISSION_SHELL_TIMEOUT_S = 120;
+
+/**
+ * Missions' shell calls get a bounded timeout (seconds), set by mutating the call's input: an
+ * unbounded `find /` blocked a mission for 15+ minutes in the real-model smoke run.
+ */
+export function capShellTimeout(toolName: string, input: Record<string, unknown>): void {
+	if (toolName !== "bash" && toolName !== "powershell") return;
+	const t = Number(input.timeout);
+	if (!Number.isFinite(t) || t <= 0 || t > MISSION_SHELL_TIMEOUT_S) input.timeout = MISSION_SHELL_TIMEOUT_S;
+}
+
 export interface PolicyHost {
 	/** Undefined in normal mode until test mode opened the store. */
 	store(): Store | undefined;
@@ -70,6 +83,7 @@ export function policyExtension(host: PolicyHost): ExtensionFactory {
 				}
 				record(decision.action, `${decision.tier} ${decision.effect}: ${decision.reason}`);
 				if (decision.action === "block") return { block: true, reason: decision.reason };
+				if (ctx.mode === "mission") capShellTimeout(event.toolName, input);
 				if (host.journal && store) {
 					journalStart(store, {
 						missionId: host.journal.missionId,

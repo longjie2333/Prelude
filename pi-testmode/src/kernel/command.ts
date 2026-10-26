@@ -33,6 +33,9 @@ const DANGEROUS: Array<[RegExp, string]> = [
 	[/\b(curl|wget)\b[^|]*\|\s*(ba|z|da)?sh\b/i, "pipes a download into a shell"],
 	[/\b(iwr|irm|Invoke-WebRequest|Invoke-RestMethod)\b[^|]*\|\s*(iex|Invoke-Expression)\b/i, "pipes a download into PowerShell"],
 	[/\breg\s+delete\b/i, "registry delete"],
+	// Whole-filesystem scans: never needed for a mission and they hang for many minutes (real-model smoke runs).
+	[/\b(find|du|ls|grep|rg|tree)\s+(-\S+\s+)*(?:(?!-)[^\s/~$]\S*\s+)?(["']?)(\/|[a-z]:(?:\\|\/)?|~|\$HOME|\/c|\/mnt\/[a-z])\3(?=\s|$)/i, "scans a whole filesystem or home directory"],
+	[/\bGet-ChildItem\b[^|;]*-Recurse[^|;]*\s(["']?)([a-z]:\\?|~|\\)\1(\s|$)/i, "scans a whole drive or home directory"],
 ];
 
 const INSTALLS: RegExp[] = [
@@ -83,7 +86,9 @@ function stripEnvPrefix(segment: string): string {
 function isMutatingCurl(segment: string): boolean {
 	if (!/^(curl|wget|http|https|xh|iwr|irm|invoke-webrequest|invoke-restmethod)\b/i.test(segment)) return false;
 	if (/\s(-X|--request|-Method)\s*['"]?(POST|PUT|PATCH|DELETE)\b/i.test(segment)) return true;
-	return /\s(-d|--data(-raw|-binary|-urlencode)?|-F|--form|-T|--upload-file|--json|-Body|--post-data)\b/i.test(segment);
+	// Case-sensitive on purpose: curl's -D (dump headers) and -T are different from -d / -t.
+	if (/\s(-d|-F|-T)(\s|=|['"])/.test(segment)) return true;
+	return /\s(--data(-raw|-binary|-urlencode)?|--form|--upload-file|--json|-Body|--post-data)\b/i.test(segment);
 }
 
 function extractHosts(cmd: string): string[] {
@@ -98,11 +103,42 @@ function extractHosts(cmd: string): string[] {
 	return [...found];
 }
 
-function extractWriteTargets(cmd: string): string[] {
+/**
+ * Shell text with quoted strings and comments blanked out, so a `>` inside `"accepted > 5"`,
+ * `node -e "...=>..."`, or `# a -> b` is not taken for a redirect (real-model smoke run).
+ * A quoted redirect target (`> "out file"`) stays visible: only quotes not directly after `>` are blanked.
+ */
+function unquoted(cmd: string): string {
+	let out = "";
+	let i = 0;
+	while (i < cmd.length) {
+		const ch = cmd[i];
+		if (ch === '"' || ch === "'") {
+			const end = cmd.indexOf(ch, i + 1);
+			const stop = end < 0 ? cmd.length : end + 1;
+			// A quoted redirect target is kept verbatim (closing quote included); other strings are blanked.
+			out += />\s*$/.test(out) ? cmd.slice(i, stop) : " ".repeat(stop - i);
+			i = stop;
+		} else if (ch === "#" && (i === 0 || /\s/.test(cmd[i - 1]))) {
+			const end = cmd.indexOf("\n", i);
+			const stop = end < 0 ? cmd.length : end;
+			out += " ".repeat(stop - i);
+			i = stop;
+		} else {
+			out += ch;
+			i++;
+		}
+	}
+	return out;
+}
+
+function extractWriteTargets(raw: string): string[] {
+	const cmd = unquoted(raw);
 	const targets: string[] = [];
-	for (const m of cmd.matchAll(/(?<![0-9&])>>?\s*(?!&)(["']?)([^\s;&|"'<>]+)\1/g)) targets.push(m[2]);
-	for (const m of cmd.matchAll(/\btee\s+(?:-a\s+)?(["']?)([^\s;&|"']+)\1/g)) targets.push(m[2]);
-	for (const m of cmd.matchAll(/\b(Out-File|Set-Content|Add-Content)\b[^|;]*?(?:-(?:File)?Path\s+)?(["']?)([^\s;|"'-][^\s;|"']*)\2/gi)) targets.push(m[3]);
+	// Not part of `2>&1`, `=>`, `->`, `>=`, or `-gt`-style arithmetic.
+	for (const m of cmd.matchAll(/(?<![0-9&=\-<>])>>?(?![=&>])\s*(?:"([^"]+)"|'([^']+)'|([^\s;&|"'<>()]+))/g)) targets.push(m[1] ?? m[2] ?? m[3]);
+	for (const m of raw.matchAll(/\btee\s+(?:-a\s+)?(["']?)([^\s;&|"']+)\1/g)) targets.push(m[2]);
+	for (const m of raw.matchAll(/\b(Out-File|Set-Content|Add-Content)\b[^|;]*?(?:-(?:File)?Path\s+)?(["']?)([^\s;|"'-][^\s;|"']*)\2/gi)) targets.push(m[3]);
 	return targets.filter((t) => !/^\/dev\/(null|stdout|stderr)$/i.test(t) && t.toLowerCase() !== "nul" && t !== "$null");
 }
 

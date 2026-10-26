@@ -41,7 +41,12 @@ export interface Evaluation {
 }
 
 /** A script can fail when it exits non-zero on some path, asserts, or throws. `process.exit(0)` alone cannot. */
-const ASSERTS = /process\.exit\(\s*(?!0\s*\))[^)]|process\.exitCode\s*=|\bassert[.(]|\bexpect\(|\bthrow\b|\bexit\s+[1-9]|sys\.exit\(\s*[1-9]/;
+/**
+ * Static fallback when no run exited non-zero: a non-zero or computed exit (`exit 1`, `exit $fail`,
+ * `sys.exit(main())`, `process.exit(ok ? 0 : 1)`), an assertion, a throw/raise, or `set -e`.
+ * `process.exit(0)` / `exit 0` alone cannot fail.
+ */
+const ASSERTS = /process\.exit\(\s*(?!0\s*\))[^)]|process\.exitCode\s*=|\bassert\b|\bexpect\(|\bthrow\b|\braise\b|\bexit\s+(?!0\b)\S|sys\.exit\(\s*(?!0\s*\))[^)]|\bset\s+-[a-z]*e/;
 const SCRIPT = /\.(m?[jt]s|cjs|sh|py)$/i;
 
 /** Agent-core §10.3 #8: tampering with frozen artifacts, tests that cannot fail, verifier-reported issues. */
@@ -52,12 +57,16 @@ export function detectCheating(s: Store, m: MissionRow): string[] {
 		if (a.event === "artifact_tamper") out.push(`frozen artifact changed before a test_run: ${a.reason ?? ""}`);
 		if (a.event === "tool_call" && a.decision === "block" && /frozen test artifact|modify scope\.json/.test(a.reason ?? "")) out.push(`attempted to modify a frozen artifact (${a.tool})`);
 	}
+	const v0 = verifierOf(s, m.id);
+	const runs = [...listTestRuns(s, m.id), ...(v0 ? listTestRuns(s, v0.id) : [])];
 	for (const f of listFrozen(s, m.id)) {
 		if (!SCRIPT.test(f.path) || !existsSync(f.path)) continue;
-		if (!ASSERTS.test(readFileSync(f.path, "utf8"))) out.push(`${f.path.split(/[\\/]/).pop()} has no way to fail (no assertion or non-zero exit)`);
+		const name = f.path.split(/[\\/]/).pop() as string;
+		// Evidence beats heuristics: a run of the script that exited non-zero proves it can fail.
+		if (runs.some((r) => r.command.toLowerCase().includes(name) && r.exitCode !== null && r.exitCode !== 0)) continue;
+		if (!ASSERTS.test(readFileSync(f.path, "utf8"))) out.push(`${name} has no way to fail (no assertion or non-zero exit)`);
 	}
-	const v = verifierOf(s, m.id);
-	for (const issue of (v?.envelope as Envelope | null)?.integrity_issues ?? []) out.push(`verifier: ${issue}`);
+	for (const issue of (v0?.envelope as Envelope | null)?.integrity_issues ?? []) out.push(`verifier: ${issue}`);
 	return out;
 }
 

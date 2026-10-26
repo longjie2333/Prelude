@@ -40,6 +40,10 @@ describe("claims need test_run verdicts", () => {
 		expect(verifyClaim("defect", [run("a", "pass"), run("b", "fail")])).toBe("inconclusive");
 		expect(verifyClaim("defect", [run("a", "inconclusive")])).toBe("inconclusive");
 		expect(verifyClaim("pass", [run("a", "pass")])).toBe("confirmed");
+		// Race-dependent defect seen in the real-model smoke run: 7 of 10 replays fail.
+		const race = [...Array.from({ length: 7 }, (_, i) => run(`f${i}`, "fail")), ...Array.from({ length: 3 }, (_, i) => run(`p${i}`, "pass"))];
+		expect(verifyClaim("defect", race)).toBe("confirmed");
+		expect(verifyClaim("defect", race.slice(4))).toBe("inconclusive"); // 3 fail / 3 pass
 	});
 });
 

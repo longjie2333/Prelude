@@ -2,6 +2,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { capShellTimeout } from "../../src/kernel/policy-extension.ts";
 import { Orchestrator } from "../../src/orchestrator/orchestrator.ts";
 import { getMission, insertIntent, listAudit } from "../../src/store/repos.ts";
 import { type TempProject, tempProject, waitFor } from "../helpers.ts";
@@ -57,13 +58,42 @@ describe("mission lifecycle", () => {
 		await o.shutdown();
 	});
 
-	it("a mission that blows its budget ends partial", async () => {
+	it("a mission that blows its budget ends partial; requested budgets have a floor", async () => {
 		const chatter: Step = () => fauxAssistantMessage(fauxToolCall("ls", { path: "." }));
-		const { o, router } = orchestrator({ scout: Array.from({ length: 20 }, () => chatter) });
+		const { o, router } = orchestrator({ scout: Array.from({ length: 200 }, () => chatter) });
 		const id = await dispatchScout(o, router, { tokens: 2000 });
-		await waitFor(() => getMission(p.store, id)?.status === "partial");
+		expect(getMission(p.store, id)?.budget.tokens).toBe(75_000); // half the scout default
+		await waitFor(() => getMission(p.store, id)?.status === "partial", 60_000);
 		expect(getMission(p.store, id)?.error).toMatch(/budget/);
 		await o.shutdown();
+	}, 90_000);
+
+	it("at 100% of the budget a mission may still submit; it is aborted only past the grace margin", async () => {
+		const chatter: Step = () => fauxAssistantMessage(fauxToolCall("ls", { path: "." }));
+		// The scout keeps calling ls until it is told the budget is exhausted, then submits.
+		const steps: Step[] = Array.from({ length: 200 }, () => (ctx) => (ctx.lastUserText().includes("Budget exhausted") ? submit(ctx) : chatter(ctx)));
+		const { o, router } = orchestrator({ scout: steps });
+		const id = await dispatchScout(o, router, { tokens: 2000 });
+		await waitFor(() => ["completed", "partial"].includes(getMission(p.store, id)?.status ?? ""), 60_000);
+		const m = getMission(p.store, id);
+		expect(m?.status).toBe("completed");
+		expect(m?.cost.tokens).toBeGreaterThanOrEqual(m?.budget.tokens ?? 0);
+		await o.shutdown();
+	}, 90_000);
+
+	it("caps mission shell timeouts", () => {
+		const a: Record<string, unknown> = { command: "find . -name x" };
+		capShellTimeout("bash", a);
+		expect(a.timeout).toBe(120);
+		const b: Record<string, unknown> = { command: "x", timeout: 30 };
+		capShellTimeout("powershell", b);
+		expect(b.timeout).toBe(30);
+		const c: Record<string, unknown> = { command: "x", timeout: 9999 };
+		capShellTimeout("bash", c);
+		expect(c.timeout).toBe(120);
+		const d: Record<string, unknown> = { path: "x" };
+		capShellTimeout("read", d);
+		expect(d.timeout).toBeUndefined();
 	});
 
 	it("session shutdown aborts running missions; they are offered again on re-entry", async () => {

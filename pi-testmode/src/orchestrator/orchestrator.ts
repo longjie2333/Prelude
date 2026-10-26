@@ -272,7 +272,9 @@ export class Orchestrator {
 				riskTier: risk.tier,
 				riskReasons: risk.reasons,
 				budget: {
-					tokens: req.budget?.tokens ?? base.tokens,
+					// Floor at half the role default: usage counts the whole context on every turn, and the
+					// real-model smoke run showed missions starved by small requested budgets (decision I-27).
+					tokens: Math.max(req.budget?.tokens ?? base.tokens, Math.floor(base.tokens / 2)),
 					wallClockMs: req.budget?.wall_clock_s ? req.budget.wall_clock_s * 1000 : base.wallClockMs,
 				},
 				model: this.lastModel,

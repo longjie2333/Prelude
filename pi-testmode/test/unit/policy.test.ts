@@ -105,6 +105,24 @@ describe("shell", () => {
 		expect(evaluateToolCall("bash", { command: "node script.mjs" }, ctx).effect).toBe("side_effecting");
 	});
 
+	it("blocks whole-filesystem scans and tells curl -D from -d (smoke-run findings)", () => {
+		const ctx = policyCtx(p);
+		for (const cmd of ['find / -maxdepth 6 -type d -name "skills"', "du -sh ~", "grep -r password /", "ls -laR C:\\"]) {
+			expect(evaluateToolCall("bash", { command: cmd }, ctx).action, cmd).toBe("block");
+		}
+		expect(evaluateToolCall("bash", { command: "find . -name '*.json'" }, ctx).action).toBe("allow");
+		expect(evaluateToolCall("bash", { command: "curl -s -D - -o /dev/null http://localhost:4100/products/p1" }, ctx)).toMatchObject({ action: "allow", effect: "read_only" });
+		expect(evaluateToolCall("bash", { command: "curl -s -d '{}' http://localhost:4100/orders" }, ctx).effect).toBe("side_effecting");
+	});
+
+	it("treats mkdir/touch inside the run directory as R0 even for a read-only mission", () => {
+		const ctx = policyCtx(p, { missionTier: "R1" });
+		const run = ctx.runDir as string;
+		expect(evaluateToolCall("bash", { command: `mkdir -p "${join(run, "evidence")}" && cd ${run} && touch notes.md` }, ctx)).toMatchObject({ action: "allow", tier: "R0", effect: "idempotent" });
+		expect(evaluateToolCall("bash", { command: `mkdir -p ${join(p.root, "src", "x")}` }, ctx).action).toBe("ask");
+		expect(evaluateToolCall("bash", { command: `mkdir -p ${join(run, "a")} && rm -rf ${join(p.root, "src")}` }, ctx).action).not.toBe("allow");
+	});
+
 	it("escalates operations above the mission's tier", () => {
 		const ctx = policyCtx(p, { missionTier: "R1" });
 		expect(evaluateToolCall("bash", { command: "curl -X POST http://localhost:4100/orders -d '{}'" }, ctx)).toMatchObject({ action: "ask", tier: "R3" });
@@ -130,6 +148,17 @@ describe("MCP annotations", () => {
 });
 
 describe("analyzeCommand", () => {
+	it("does not take > inside quotes, arrows, comments, or 2>&1 for a redirect (smoke-run commands)", () => {
+		const none = [
+			'if [ "$N" -gt 5 ]; then echo "VERDICT=OVERCLAIM_CONFIRMED (accepted $N > capacity 5)"; exit 1; fi',
+			`node -e "const s=require('http').createServer((q,r)=>{r.end('ok')});"`,
+			'x=1\n# Fault 1: scope check -> escape refusal must break.\necho ok',
+			"python --version 2>&1; python3 --version 2>&1; node -v",
+		];
+		for (const c of none) expect(analyzeCommand(c).writeTargets, c).toEqual([]);
+		expect(analyzeCommand('echo hi > "out file.txt" && cat x >> log.txt').writeTargets).toEqual(["out file.txt", "log.txt"]);
+	});
+
 	it("extracts hosts, installs, and write targets", () => {
 		const a = analyzeCommand("curl -s http://localhost:4100/a > out.json && npm install --save-dev vitest");
 		expect(a.hosts).toContain("localhost:4100");

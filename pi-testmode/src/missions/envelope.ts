@@ -117,17 +117,20 @@ export function validateClaimsAgainstRuns(claims: readonly Claim[], runs: readon
 
 export type VerificationResult = "confirmed" | "refuted" | "inconclusive";
 
+/** Evidence contract default (agent-core §7.5: `reproducibility pass >= 0.6`). */
+export const MIN_REPRODUCIBILITY = 0.6;
+
 /**
  * Deterministic verification of one executor claim from the verifier's own test runs:
- * confirmed when some run reproduces the expected verdict and none contradicts it.
+ * confirmed when at least 60% of the decided runs reproduce the expected verdict (race-dependent
+ * defects do not reproduce every time), refuted when none does, inconclusive in between.
  */
 export function verifyClaim(claimType: string, verifierRuns: readonly TestRunRow[]): VerificationResult {
 	const need = expectedVerdict(claimType);
 	if (!need) return "inconclusive";
 	const decided = verifierRuns.filter((r) => r.verdict === "pass" || r.verdict === "fail");
 	const agree = decided.filter((r) => r.verdict === need).length;
-	const disagree = decided.length - agree;
-	if (agree > 0 && disagree === 0) return "confirmed";
-	if (agree === 0 && disagree > 0) return "refuted";
+	if (agree > 0 && agree / decided.length >= MIN_REPRODUCIBILITY) return "confirmed";
+	if (agree === 0 && decided.length > 0) return "refuted";
 	return "inconclusive";
 }

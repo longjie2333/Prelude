@@ -58,7 +58,12 @@ const DispatchParams = Type.Object({
 			targets: Type.Array(Type.String(), { description: "Hosts or URLs the mission may touch, e.g. http://localhost:4100" }),
 			test_kinds: Type.Array(StringEnum(TEST_KINDS), { description: "Operations needed: functional, load, security-check, destructive" }),
 			context: Type.Optional(Type.String({ description: "What the mission needs to know: SUT docs, reset endpoint, hypotheses" })),
-			budget: Type.Optional(Type.Object({ tokens: Type.Optional(Type.Number()), wall_clock_s: Type.Optional(Type.Number()) })),
+			budget: Type.Optional(
+				Type.Object(
+					{ tokens: Type.Optional(Type.Number()), wall_clock_s: Type.Optional(Type.Number()) },
+					{ description: "Usually omit. Tokens count the whole context on every turn; values below half the role default are raised to it." },
+				),
+			),
 			template_ids: Type.Optional(Type.Array(Type.String(), { description: "Template ids from knowledge_search cards to activate in this mission" })),
 			capabilities: Type.Optional(Type.Array(Type.String(), { description: "Extra capability ids to bind (cap:…)" })),
 		}),

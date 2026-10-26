@@ -125,6 +125,29 @@ export function writeDenial(ctx: PolicyContext, rawPath: string, allowTemp = fal
 	return `missions may only write inside their run directory (${ctx.runDir})`;
 }
 
+/** Every segment is `cd`, `mkdir`/`touch` on paths inside the run directory, or read-only, and output stays there too. */
+function confinedToRunDir(command: string, ctx: PolicyContext): boolean {
+	if (ctx.mode !== "mission" || !ctx.runDir) return false;
+	const run = canonicalPath(ctx.runDir, ctx.cwd, ctx.home);
+	const inside = (p: string) => isInside(canonicalPath(p.replace(/^["']|["']$/g, ""), ctx.cwd, ctx.home), run);
+	const segments = command.split(/&&|;|\n/).map((s) => s.trim()).filter(Boolean);
+	let base = ctx.cwd;
+	for (const seg of segments) {
+		const words = seg.match(/"[^"]*"|'[^']*'|\S+/g) ?? [];
+		const [cmd, ...args] = words;
+		const paths = args.filter((w) => !w.startsWith("-")).map((w) => (/^([a-z]:|\/|~)/i.test(w.replace(/^["']/, "")) ? w : join(base, w.replace(/^["']|["']$/g, ""))));
+		if (cmd === "cd") {
+			if (paths.length !== 1 || !inside(paths[0])) return false;
+			base = paths[0].replace(/^["']|["']$/g, "");
+		} else if (cmd === "mkdir" || cmd === "touch") {
+			if (paths.length === 0 || !paths.every(inside)) return false;
+		} else if (!analyzeCommand(seg).readOnly) {
+			return false;
+		}
+	}
+	return segments.some((s) => /^(mkdir|touch)\s/.test(s));
+}
+
 function evaluateShell(command: string, ctx: PolicyContext, toolName: string): PolicyDecision {
 	const a = analyzeCommand(command);
 	if (a.dangerous) return block(`dangerous command blocked: ${a.dangerous}`, "R4");
@@ -165,6 +188,10 @@ function evaluateShell(command: string, ctx: PolicyContext, toolName: string): P
 
 	let effect: EffectClass;
 	let tier: RiskTier;
+	if (!a.readOnly && !a.mutatingHttp && a.hosts.length === 0 && confinedToRunDir(command, ctx)) {
+		// Only cd/mkdir/touch/read-only steps inside the mission's own run directory (seen in the real-model smoke run).
+		return { action: "allow", tier: "R0", effect: "idempotent", reason: "creates files only inside the run directory" };
+	}
 	if (a.readOnly) {
 		effect = "read_only";
 		tier = a.hosts.length > 0 ? "R1" : "R0";
