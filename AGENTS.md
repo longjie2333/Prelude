@@ -71,7 +71,7 @@ npm run canary                                    # 靶场 http://localhost:4100
 - **注释**：文件头一段说明职责，并引用 plan / agent-core 的编号（`plan M1-6`、`decision I-10`、`agent-core §10.3`）；代码内注释只写"为什么"，尤其是被真实运行逼出来的规则（见 `capShellTimeout`）。
 - **提示词即代码**：`roles/*.md` 和工具的 `description` 决定真实模型的行为，faux 测试测不出效果变化。改了它们要在交付说明里写"未经真实模型验证"，或征得同意后跑冒烟运行。faux 路由（`test/e2e/faux.ts` 的 `identify`）解析 `<mission>` 段的 `role:` 行，改 `renderMissionSpec` 格式时同步改它。
 - **测试**：unit 用 `test/helpers.ts` 的 `tempProject()`（临时目录 + 真实 SQLite）和 `policyCtx()`；e2e 为每个角色写 faux 脚本（`createRouter`），canary 用 `startCanary()` 起在随机端口。修 bug 加回归测试。
-- **文档语言**：`docs/` 用中文；`pi-testmode/README.md`、代码注释、commit message 用英文。
+- **文档语言**：`docs/` 用中文；代码注释和 commit message 用英文。`pi-testmode/README.md`（英文）和 `README.zh-CN.md`（中文）内容一致，改其中一份时，在同一个提交里同步另一份。
 
 ## 改动流程
 
