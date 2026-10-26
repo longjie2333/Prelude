@@ -73,6 +73,13 @@ export async function startCanary(
 	};
 }
 
+/** Path for a TESTMODE_DEBUG output file under `<package>/tmp/` (gitignored); creates the directory. */
+export function debugFile(name: string): string {
+	const dir = join(process.cwd(), "tmp");
+	mkdirSync(dir, { recursive: true });
+	return join(dir, name);
+}
+
 export async function waitFor<T>(fn: () => T | undefined | false | Promise<T | undefined | false>, timeoutMs = 20_000, intervalMs = 25): Promise<T> {
 	const start = Date.now();
 	for (;;) {

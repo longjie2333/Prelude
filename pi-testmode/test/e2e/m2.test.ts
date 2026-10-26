@@ -13,7 +13,7 @@ import { createTestmodeExtension } from "../../src/mode.ts";
 import type { Orchestrator } from "../../src/orchestrator/orchestrator.ts";
 import { intentCost } from "../../src/orchestrator/report.ts";
 import { getIntent, insertIntent, listAudit, listMissions } from "../../src/store/repos.ts";
-import { startCanary, type TempProject, tempProject, waitFor } from "../helpers.ts";
+import { debugFile, startCanary, type TempProject, tempProject, waitFor } from "../helpers.ts";
 import { createRouter, idFrom, type Step } from "./faux.ts";
 
 const SECRET = "SECRET-USER-SKILL-7f3a";
@@ -289,6 +289,6 @@ process.exit(out.value === 7 ? 0 : 1);
 		expect(getProvider(p.store, provider.sha256)?.trust).toBe("quarantined");
 		expect(listAudit(p.store, { event: "provider_hash_mismatch" })).toHaveLength(1);
 
-		if (process.env.TESTMODE_DEBUG) writeFileSync(join(process.cwd(), "m2-report.md"), `${report2}\n\nratio ${c2}/${c1}`);
+		if (process.env.TESTMODE_DEBUG) writeFileSync(debugFile("m2-report.md"), `${report2}\n\nratio ${c2}/${c1}`);
 	});
 });

@@ -20,7 +20,7 @@ import { exceptionSupport, getStats } from "../../src/learning/stats.ts";
 import { Orchestrator } from "../../src/orchestrator/orchestrator.ts";
 import { insertIntent, listAudit, listMissions } from "../../src/store/repos.ts";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { startCanary, type TempProject, tempProject, waitFor } from "../helpers.ts";
+import { debugFile, startCanary, type TempProject, tempProject, waitFor } from "../helpers.ts";
 import { createRouter, idFrom, type Router, type Step } from "./faux.ts";
 
 const call = (name: string, args: Parameters<typeof fauxToolCall>[1]): Step => () => fauxAssistantMessage(fauxToolCall(name, args));
@@ -285,7 +285,7 @@ describe("M3: feedback triage and template evolution", () => {
 		expect(classOf(E4.missionId)?.triage_class).toBe("B");
 		await waitFor(() => listDeltas(p.store, { target: T }).some((d) => d.op === "except" && d.status === "committed"), 30_000).catch((err) => {
 			if (process.env.TESTMODE_DEBUG) {
-				writeFileSync(join(process.cwd(), "m3-debug.txt"), [
+				writeFileSync(debugFile("m3-debug.txt"), [
 					...listAudit(p.store).slice(-40).map((a) => `${a.actor} ${a.event} ${a.tool ?? ""} ${a.decision ?? ""} ${a.reason ?? ""}`),
 					"--- deltas",
 					...listDeltas(p.store).map((d) => `${d.id} ${d.op} ${d.status} ev=${d.evidence.length} ${JSON.stringify(d.report?.checks.filter((c) => !c.ok) ?? [])}`),
@@ -330,7 +330,7 @@ describe("M3: feedback triage and template evolution", () => {
 		expect(listAudit(p.store, { event: "facet_activated" })).toHaveLength(1);
 		if (process.env.TESTMODE_DEBUG) {
 			writeFileSync(
-				join(process.cwd(), "m3-story.txt"),
+				debugFile("m3-story.txt"),
 				[
 					JSON.stringify(v2?.spec.applicability.exceptions, null, 1),
 					`committed delta replay: ${JSON.stringify(delta?.report?.replay)}`,

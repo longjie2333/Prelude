@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestmodeExtension } from "../../src/mode.ts";
 import type { Orchestrator } from "../../src/orchestrator/orchestrator.ts";
 import { getIntent, listAudit, listMissions, listTestRuns } from "../../src/store/repos.ts";
-import { startCanary, type TempProject, tempProject, waitFor } from "../helpers.ts";
+import { debugFile, startCanary, type TempProject, tempProject, waitFor } from "../helpers.ts";
 import { createRouter, idFrom, type Step } from "./faux.ts";
 
 const OVERSELL = (url: string) => `const base = process.argv[2] ?? ${JSON.stringify(url)};
@@ -184,8 +184,8 @@ describe("test mode loop", () => {
 		expect(router.seen.filter((s) => s.info.actor === "main")).toHaveLength(4);
 		const report = readFileSync(getIntent(p.store, intentId)?.reportPath as string, "utf8");
 		if (process.env.TESTMODE_DEBUG) {
-			writeFileSync(join(process.cwd(), "tmp", "loop-report.md"), report);
-			writeFileSync(join(process.cwd(), "tmp", "loop-audit.txt"), listAudit(p.store).map((a) => `${a.actor} ${a.event} ${a.tool ?? ""} ${a.decision ?? ""} ${a.reason ?? ""}`).join("\n"));
+			writeFileSync(debugFile("loop-report.md"), report);
+			writeFileSync(debugFile("loop-audit.txt"), listAudit(p.store).map((a) => `${a.actor} ${a.event} ${a.tool ?? ""} ${a.decision ?? ""} ${a.reason ?? ""}`).join("\n"));
 		}
 		expect(report).toContain("## Verified defects (1)");
 		expect(report).toContain("**confirmed**");
