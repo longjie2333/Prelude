@@ -162,6 +162,28 @@ export interface ReviewResult {
 	reason: string;
 }
 
+/** Token use of a review sub-session; it has no session file, so the audit is the only record. */
+export interface ReviewUsage {
+	turns: number;
+	input: number;
+	output: number;
+	cacheRead: number;
+	cacheWrite: number;
+}
+
+export function sumUsage(messages: readonly unknown[]): ReviewUsage {
+	const u: ReviewUsage = { turns: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+	for (const m of messages as Array<{ role?: string; usage?: Partial<ReviewUsage> }>) {
+		if (m.role !== "assistant" || !m.usage) continue;
+		u.turns++;
+		u.input += m.usage.input ?? 0;
+		u.output += m.usage.output ?? 0;
+		u.cacheRead += m.usage.cacheRead ?? 0;
+		u.cacheWrite += m.usage.cacheWrite ?? 0;
+	}
+	return u;
+}
+
 export const REVIEW_SECTION = "prelude_review";
 
 const REVIEW_PROMPT = `你是独立审查员。另一个测试者声称发现了一个问题，并给出了复现脚本和证据。你看不到他的测试过程，这是有意的。
@@ -203,7 +225,7 @@ export async function review(
 	f: Finding,
 	rr: RerunResult | undefined,
 	deps: ReviewDeps,
-): Promise<ReviewResult> {
+): Promise<ReviewResult & { usage: ReviewUsage }> {
 	let verdict: ReviewResult | undefined;
 	const verdictTool = defineTool({
 		name: "review_verdict",
@@ -249,6 +271,7 @@ export async function review(
 		sessionManager: SessionManager.inMemory(deps.cwd),
 		settingsManager: SettingsManager.inMemory({ compaction: { enabled: false } }),
 	});
+	let usage: ReviewUsage | undefined;
 	const onAbort = () => void session.abort();
 	deps.signal?.addEventListener("abort", onAbort, { once: true });
 	try {
@@ -258,12 +281,13 @@ export async function review(
 			await session.prompt("请调用 review_verdict 给出结论。", { expandPromptTemplates: false });
 	} finally {
 		deps.signal?.removeEventListener("abort", onAbort);
+		usage = sumUsage(session.messages);
 		// dispose() does not emit session_shutdown (plan §1).
 		await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" }).catch(() => undefined);
 		session.dispose();
 	}
 	if (!verdict) throw new Error(`reviewer for ${f.id} ended without review_verdict`);
-	return verdict;
+	return { ...verdict, usage: usage ?? sumUsage([]) };
 }
 
 // ---------------------------------------------------------------- verify_findings
@@ -286,6 +310,7 @@ export async function verifyFinding(
 	}
 	const rerunSummary = rr && { runs: rr.runs, reproduced: rr.reproduced, rate: rr.rate, exitCodes: rr.exitCodes };
 	let v: Verification;
+	let usage: ReviewUsage | undefined;
 	if (rr && rr.rate < REPRO_THRESHOLD) {
 		// Not reproduced by code: no claim left for a reviewer to judge (D-7).
 		v = { verdict: "not-reproduced", at: nowIso(), rerun: rerunSummary };
@@ -298,7 +323,8 @@ export async function verifyFinding(
 			gate: prelude.gate({ interactive: false }),
 			signal,
 		});
-		v = { verdict: r.verdict, at: nowIso(), rerun: rerunSummary, review: r };
+		usage = r.usage;
+		v = { verdict: r.verdict, at: nowIso(), rerun: rerunSummary, review: { verdict: r.verdict, reason: r.reason } };
 	}
 	run.updateFinding(f.id, (x) => {
 		x.verification = v;
@@ -308,7 +334,7 @@ export async function verifyFinding(
 		finding: f.id,
 		decision: v.verdict,
 		reason: v.review?.reason,
-		detail: rerunSummary ? { rerun: rerunSummary } : undefined,
+		detail: rerunSummary || usage ? { rerun: rerunSummary, reviewUsage: usage } : undefined,
 	});
 	return v;
 }

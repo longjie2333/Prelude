@@ -135,18 +135,14 @@ async function mainSession(router: Router, sessionManager = SessionManager.inMem
 	return s;
 }
 
-/** `/test <goal>` hands the goal on with sendUserMessage, so the run starts after prompt() returns. */
+/**
+ * SDK sessions run in "print" mode, like `pi -p`, which disposes the session once prompt()
+ * returns. `/test <goal>` must therefore return only after the test run it starts has settled;
+ * awaiting prompt() alone is the regression check.
+ */
 async function runCommand(s: AgentSession, text: string) {
-	const settled = new Promise<void>((resolve) => {
-		const off = s.subscribe((e) => {
-			if (e.type === "agent_settled") {
-				off();
-				resolve();
-			}
-		});
-	});
 	await s.prompt(text);
-	await settled;
+	expect(s.isStreaming).toBe(false);
 }
 
 const write = (path: string, content: string): Step => call("write", { path, content });
@@ -255,6 +251,8 @@ describe("a Prelude test run", () => {
 			["f-003", "not-reproduced"],
 		]);
 		expect(audit.find((a) => a.event === "tool_call")?.run).toBe(run.id);
+		const reviewed = audit.filter((a) => a.event === "verification" && a.decision !== "not-reproduced");
+		expect(reviewed.every((a) => (a.detail?.reviewUsage as { turns: number }).turns >= 1)).toBe(true);
 
 		// /prelude-init ran on first /test (M1-2).
 		expect(existsSync(p.paths.projectFile)).toBe(true);

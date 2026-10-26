@@ -86,8 +86,18 @@ export function registerMode(pi: ExtensionAPI, prelude: Prelude): void {
 		enable(run.id);
 		prelude.audit({ event: "test_start", detail: { goal } });
 		ctx.ui.notify(`Prelude test ${run.id} started`, "info");
-		if (goal) pi.sendUserMessage(goal, ctx.isIdle() ? undefined : { deliverAs: "followUp" });
+		if (!goal) return;
+		// print/json modes dispose the session as soon as the command returns, and sendUserMessage
+		// does not wait for the run it starts: without waiting, `pi -p "/test …"` would end the test
+		// before it began. The TUI keeps running, so there the command returns at once.
+		const unattended = ctx.mode === "print" || ctx.mode === "json";
+		const settled = unattended ? nextSettle() : undefined;
+		pi.sendUserMessage(goal, ctx.isIdle() ? undefined : { deliverAs: "followUp" });
+		await settled;
 	};
+
+	let settleWaiters: Array<() => void> = [];
+	const nextSettle = () => new Promise<void>((resolve) => settleWaiters.push(resolve));
 
 	pi.registerCommand("test", {
 		description: "Start a Prelude test: /test <goal>. Without a goal, toggles test mode",
@@ -146,5 +156,10 @@ export function registerMode(pi: ExtensionAPI, prelude: Prelude): void {
 		opts.sections[PROMPT_SECTION] = promptSection(prelude);
 	});
 
-	pi.on("agent_settled", () => updateDisplay(prelude));
+	pi.on("agent_settled", () => {
+		updateDisplay(prelude);
+		const waiters = settleWaiters;
+		settleWaiters = [];
+		for (const w of waiters) w();
+	});
 }

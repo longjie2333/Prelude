@@ -1,0 +1,46 @@
+{
+  "id": "run-20261027-0248-981b",
+  "goal": "测一下 canary（http://localhost:4100，接口文档在 /openapi.json）的下单接口在并发下会不会超卖",
+  "startedAt": "2026-10-26T18:48:59.310Z",
+  "phase": "retro",
+  "history": [
+    {
+      "phase": "intake",
+      "at": "2026-10-26T18:48:59.310Z"
+    },
+    {
+      "phase": "intake",
+      "at": "2026-10-26T18:49:24.388Z",
+      "note": "确认范围、并发强度与可写操作，读 openapi 与现有笔记"
+    },
+    {
+      "phase": "profile",
+      "at": "2026-10-26T18:49:39.761Z",
+      "note": "探索接口行为、库存/订单/优惠券状态流转，写 notes"
+    },
+    {
+      "phase": "execute",
+      "at": "2026-10-26T19:15:53.708Z",
+      "note": "复现并记录发现：并发超卖、优惠券超发、分页漏商品、库存校验缺失、emoji 500"
+    },
+    {
+      "phase": "verify",
+      "at": "2026-10-26T19:17:56.162Z",
+      "note": "独立复验 6 条发现（5 缺陷 + 1 建议）"
+    },
+    {
+      "phase": "report",
+      "at": "2026-10-26T19:31:41.435Z",
+      "note": "写报告到 .prelude/reports/"
+    },
+    {
+      "phase": "retro",
+      "at": "2026-10-26T19:33:01.973Z",
+      "note": "复盘：更新笔记并整理可复用经验"
+    }
+  ],
+  "report": {
+    "path": ".prelude/reports/2026-10-27-canary-oversell.md",
+    "at": "2026-10-26T19:32:58.606Z"
+  }
+}

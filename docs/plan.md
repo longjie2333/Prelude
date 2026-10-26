@@ -35,7 +35,8 @@
 | 工具可见性 | `defaultActive: false` 的工具注册后不激活，用 `setActiveTools` 加入；模型看到的工具来自 system 消息的 `toolsAdded` / `toolsRemoved` | 只在测试模式加 Prelude 工具 |
 | 子会话工具 | `createAgentSession({ tools })` 是白名单，`customTools` 里的工具也要列进去 | 审查会话 |
 | `noSkills` | `DefaultResourceLoader({ noSkills: true })` 仍加载 `resources_discover` 返回的 `skillPaths` | e2e |
-| 命令发消息 | 命令里的 `pi.sendUserMessage` 不等待；`session.prompt("/cmd")` 在模型运行开始前就返回，测试要等 `agent_settled` | e2e |
+| 命令发消息 | 命令里的 `pi.sendUserMessage` 不等待它启动的运行；print/json 模式在命令返回后立即销毁会话，所以 `/test <目标>` 在这两种模式下要等到 `agent_settled` 再返回。SDK 会话的 `ctx.mode` 默认是 `"print"` | `/test` 无人值守 |
+| RPC 对话框 | RPC 模式 `hasUI` 为真，支持 `select` / `confirm` / `input`，但不支持 `ctx.ui.custom` | questionnaire 回退为逐题询问 |
 | `pi.exec` | 进程起不来（找不到解释器）时返回 `code: 1`，和"脚本以 1 退出"无法区分 | 复验重跑改用自己的 spawn |
 | print 模式 | `pi -p` 即使只执行命令也要求有可用的模型凭据 | — |
 | 安装 | npm 11 解析 vitest 的可选 peer 时崩溃，需要 `.npmrc` 设置 `legacy-peer-deps=true` | — |
@@ -75,6 +76,7 @@
 | D-12 | 测试模式下对模型隐藏 `canary/` 整个目录（读、shell 提到它都拦截），不只 `bugs.json` | `server.mjs` 的注释和代码同样写明了缺陷 |
 | D-13 | `finding_record` 记录时把复现脚本和证据按 sha256 复制进 `evidence/`；复验跑冻结副本；`runs/`、`evidence/` 只经工具写入；代码重跑未复现的缺陷不再交给审查（结论 `not-reproduced`） | 复验的必须是当时记录的东西，模型之后改文件或改 findings.jsonl 都不能影响结论 |
 | D-14 | 复现脚本约定：观察到问题才以非 0 退出；连不上目标、准备失败、意外异常以 0 退出 | 否则任何脚本错误都会被算成"复现"；审查只能兜底，不能依赖 |
+| D-15 | 审查子会话的 token 用量写进审计 `verification` 事件的 `detail.reviewUsage` | 子会话没有会话文件，否则成本对比漏掉审查部分 |
 
 ## 4. 代码结构
 
@@ -106,6 +108,8 @@
 ├── skills/
 │   └── test-pilot/     # 方法论 Skill（随扩展发布，初始化时复制进知识库）
 ├── canary/             # 靶场 SUT（从旧实现取回）
+├── scripts/
+│   └── run-canary.mjs  # 真实模型运行驱动：RPC 模式、无人值守、汇总耗时与 token
 └── test/               # unit/、e2e/（faux）
 ```
 
@@ -200,7 +204,7 @@
 
 ## 10. 交接
 
-**当前状态（2026-10-27）**：M1-1 至 M1-9 已实现；M1-10 的 unit 和 faux e2e 已通过（`npm test`）。未完成：M1-10 的真实运行（需要用户同意后在 canary 上执行一次，结果写入 `docs/runs/`），因此 M1 验收 1–3 尚未验证；`skills/test-pilot/` 未经真实模型验证。macOS/Linux 的 OS 级隔离（官方 sandbox 示例）尚未接入，报告里的隔离级别目前一律是"仅工具层策略"。
+**当前状态（2026-10-27）**：M1-1 至 M1-10 已完成，真实运行见 [runs/2026-10-27-canary-m1](runs/2026-10-27-canary-m1/README.md)。验收 1、2 通过（B1/B2/B3 全部复验确认，无误报）；验收 3 已记录，但成功标准 §0-1 未达到（44.9 分钟对旧实现 24.8 分钟，processed token 多 12%）；验收 4 的三种越界情形只有 faux e2e 证据。下一步二选一：先改 Skill 和审查提示压缩探索与审查成本（见运行报告"仍未解决"）并重跑对比，或直接进入 M2。macOS/Linux 的 OS 级隔离尚未接入。
 
 - 顺序 M1 → M2 → M3。每个里程碑交付：代码、通过的测试、一份真实运行报告（`docs/runs/<日期>-<名称>/`）。
 - 新决策追加到 §3（D-n，写明理由），与代码放在同一个提交里。

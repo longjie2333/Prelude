@@ -1,6 +1,6 @@
 // Adapted from @earendil-works/pi-coding-agent@1.4.0 examples/extensions/questionnaire.ts
-// Changes: registered inactive (test mode activates it for the one-time intake, plan M1-3) and a
-// prompt guideline.
+// Changes: registered inactive (test mode activates it for the one-time intake, plan M1-3), a
+// prompt guideline, and a select/input fallback for RPC clients, which have no custom TUI.
 /**
  * Questionnaire Tool - Unified tool for asking single or multiple questions
  *
@@ -8,7 +8,7 @@
  * Multiple questions: tab bar navigation between questions
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import {
 	Editor,
 	type EditorTheme,
@@ -84,6 +84,49 @@ function errorResult(
 	};
 }
 
+function formatResult(questions: Question[], result: QuestionnaireResult) {
+	if (result.cancelled) {
+		return {
+			content: [{ type: "text" as const, text: "User cancelled the questionnaire" }],
+			details: result,
+		};
+	}
+
+	const answerLines = result.answers.map((a) => {
+		const qLabel = questions.find((q) => q.id === a.id)?.label || a.id;
+		if (a.wasCustom) {
+			return `${qLabel}: user wrote: ${a.label}`;
+		}
+		return `${qLabel}: user selected: ${a.index}. ${a.label}`;
+	});
+
+	return {
+		content: [{ type: "text" as const, text: answerLines.join("\n") }],
+		details: result,
+	};
+}
+
+const OTHER = "Type something";
+
+async function askWithDialogs(ui: ExtensionUIContext, questions: Question[]): Promise<QuestionnaireResult> {
+	const answers: Answer[] = [];
+	for (const q of questions) {
+		const labels = q.options.map((o) => o.label);
+		const choice = await ui.select(q.prompt, q.allowOther ? [...labels, OTHER] : labels);
+		if (choice === undefined) return { questions, answers, cancelled: true };
+		if (choice === OTHER) {
+			const text = await ui.input(q.prompt);
+			if (text === undefined) return { questions, answers, cancelled: true };
+			answers.push({ id: q.id, value: text, label: text, wasCustom: true });
+			continue;
+		}
+		const index = labels.indexOf(choice);
+		const option = q.options[index];
+		answers.push({ id: q.id, value: option?.value ?? choice, label: choice, wasCustom: false, index: index + 1 });
+	}
+	return { questions, answers, cancelled: false };
+}
+
 export default function questionnaire(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "questionnaire",
@@ -97,7 +140,7 @@ export default function questionnaire(pi: ExtensionAPI) {
 		parameters: QuestionnaireParams,
 
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			if (ctx.mode !== "tui") {
+			if (!ctx.hasUI) {
 				return errorResult("Error: UI not available (running in non-interactive mode)");
 			}
 			if (params.questions.length === 0) {
@@ -110,6 +153,9 @@ export default function questionnaire(pi: ExtensionAPI) {
 				label: q.label || `Q${i + 1}`,
 				allowOther: q.allowOther !== false,
 			}));
+
+			// RPC clients have select/input dialogs but no custom TUI: ask one question at a time.
+			if (ctx.mode !== "tui") return formatResult(questions, await askWithDialogs(ctx.ui, questions));
 
 			const isMulti = questions.length > 1;
 			const totalTabs = questions.length + 1; // questions + Submit
@@ -400,25 +446,7 @@ export default function questionnaire(pi: ExtensionAPI) {
 				};
 			});
 
-			if (result.cancelled) {
-				return {
-					content: [{ type: "text", text: "User cancelled the questionnaire" }],
-					details: result,
-				};
-			}
-
-			const answerLines = result.answers.map((a) => {
-				const qLabel = questions.find((q) => q.id === a.id)?.label || a.id;
-				if (a.wasCustom) {
-					return `${qLabel}: user wrote: ${a.label}`;
-				}
-				return `${qLabel}: user selected: ${a.index}. ${a.label}`;
-			});
-
-			return {
-				content: [{ type: "text", text: answerLines.join("\n") }],
-				details: result,
-			};
+			return formatResult(questions, result);
 		},
 
 		renderCall(args, theme, _context) {
