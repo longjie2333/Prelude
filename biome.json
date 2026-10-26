@@ -1,0 +1,17 @@
+{
+	"$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+	"files": {
+		"includes": ["src/**", "test/**", "canary/**", "*.ts", "!canary/*.json", "!**/*.md"]
+	},
+	"formatter": {
+		"enabled": true,
+		"indentStyle": "tab",
+		"indentWidth": 3,
+		"lineWidth": 120
+	},
+	"javascript": {
+		"formatter": { "quoteStyle": "double", "semicolons": "always" }
+	},
+	"linter": { "enabled": false },
+	"assist": { "enabled": false }
+}

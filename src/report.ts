@@ -1,0 +1,176 @@
+/**
+ * `report_finalize` (plan M1-8): checks the report skeleton and that its verified-defect list
+ * matches findings.jsonl, registers the report, and runs the end checks (system notes reminder;
+ * knowledge-base sync joins in M2-3).
+ */
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { extname, isAbsolute, join, relative, resolve } from "node:path";
+import { defineTool } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
+import type { Prelude } from "./context.ts";
+import { canonicalPath, isInside } from "./guard/paths.ts";
+import { updateDisplay } from "./progress.ts";
+import type { Finding, Run } from "./run.ts";
+import { nowIso, textResult } from "./util.ts";
+
+/** Required sections and the headings accepted for each (design §4 step 7, plan M1-8). */
+export const SECTIONS = {
+	conclusion: ["结论", "Conclusion", "Summary"],
+	defects: ["已复验缺陷", "Verified defects", "Confirmed defects"],
+	suggestions: ["建议", "Suggestions"],
+	unreproduced: ["未复现项", "Not reproduced", "Unreproduced"],
+	tested: ["测了什么", "What was tested", "Tested"],
+	untested: ["没测什么", "What was not tested", "Not tested"],
+	isolation: ["隔离级别", "Isolation"],
+} as const;
+export type SectionKey = keyof typeof SECTIONS;
+
+const FINDING_ID = /\bf-\d{3}\b/g;
+
+function normalize(heading: string): string {
+	return heading
+		.replace(/^[\s\d.、:：\-)）(（]+/, "")
+		.trim()
+		.toLowerCase();
+}
+
+/** Body of each heading (any level), up to the next heading of the same or a higher level. */
+export function parseSections(markdown: string): Map<SectionKey, string> {
+	const lines = markdown.split(/\r?\n/);
+	const heads: Array<{ line: number; level: number; text: string }> = [];
+	let fence = false;
+	lines.forEach((l, i) => {
+		if (/^\s*(```|~~~)/.test(l)) fence = !fence;
+		const m = !fence && l.match(/^(#{1,6})\s+(.*?)\s*#*\s*$/);
+		if (m) heads.push({ line: i, level: m[1].length, text: m[2] });
+	});
+	const out = new Map<SectionKey, string>();
+	heads.forEach((h, i) => {
+		const n = normalize(h.text);
+		const key = (Object.keys(SECTIONS) as SectionKey[]).find((k) =>
+			SECTIONS[k].some((name) => n.startsWith(name.toLowerCase())),
+		);
+		if (!key || out.has(key)) return;
+		const next = heads.slice(i + 1).find((x) => x.level <= h.level);
+		out.set(key, lines.slice(h.line + 1, next ? next.line : lines.length).join("\n"));
+	});
+	return out;
+}
+
+const ids = (text: string | undefined) => new Set(text?.match(FINDING_ID) ?? []);
+
+export interface ReportCheck {
+	problems: string[];
+	defects: string[];
+	suggestions: string[];
+	unreproduced: string[];
+}
+
+/** Everything wrong with the report, so the model can fix it in one pass. */
+export function checkReport(markdown: string, findings: Finding[], platform = process.platform): ReportCheck {
+	const sections = parseSections(markdown);
+	const problems: string[] = [];
+	for (const key of Object.keys(SECTIONS) as SectionKey[]) {
+		if (!sections.has(key)) problems.push(`missing section: ${SECTIONS[key][0]}`);
+	}
+	const unverified = findings.filter((f) => !f.verification);
+	if (unverified.length)
+		problems.push(`not verified yet: ${unverified.map((f) => f.id).join(", ")}; call verify_findings`);
+
+	const confirmed = (kind: Finding["kind"]) =>
+		findings.filter((f) => f.kind === kind && f.verification?.verdict === "confirmed").map((f) => f.id);
+	const defects = confirmed("defect");
+	const suggestions = confirmed("suggestion");
+	const unreproduced = findings
+		.filter((f) => f.verification && f.verification.verdict !== "confirmed")
+		.map((f) => f.id);
+
+	const inDefects = ids(sections.get("defects"));
+	for (const id of defects)
+		if (!inDefects.has(id)) problems.push(`${id} is a verified defect but not under 已复验缺陷`);
+	for (const id of inDefects)
+		if (!defects.includes(id)) problems.push(`${id} is under 已复验缺陷 but is not a confirmed defect`);
+	const inSuggestions = ids(sections.get("suggestions"));
+	for (const id of suggestions)
+		if (!inSuggestions.has(id)) problems.push(`${id} is a confirmed suggestion but not under 建议`);
+	const inUnreproduced = ids(sections.get("unreproduced"));
+	for (const id of unreproduced)
+		if (!inUnreproduced.has(id)) problems.push(`${id} was rejected or not reproduced but is not under 未复现项`);
+
+	const isolation = sections.get("isolation") ?? "";
+	if (sections.has("isolation") && platform === "win32" && !/仅工具层|tool[- ]layer only/i.test(isolation))
+		problems.push(
+			"on Windows the isolation section must say 仅工具层策略 (tool-layer policy only, not a security boundary)",
+		);
+	return { problems, defects, suggestions, unreproduced };
+}
+
+function newestMtime(dir: string): number {
+	if (!existsSync(dir)) return 0;
+	let newest = 0;
+	for (const e of readdirSync(dir, { withFileTypes: true })) {
+		const p = join(dir, e.name);
+		newest = Math.max(newest, e.isDirectory() ? newestMtime(p) : statSync(p).mtimeMs);
+	}
+	return newest;
+}
+
+function reportFile(run: Run, path: string): string {
+	const abs = isAbsolute(path) ? path : resolve(run.project.root, path);
+	const c = (p: string) => canonicalPath(p, run.project.root);
+	if (!isInside(c(abs), c(run.project.reportsDir))) throw new Error("the report must be under .prelude/reports/");
+	if (extname(abs).toLowerCase() !== ".md") throw new Error("the report must be a Markdown file");
+	if (!existsSync(abs)) throw new Error(`report not found: ${path}`);
+	return abs;
+}
+
+export function createReportFinalizeTool(prelude: Prelude) {
+	return defineTool({
+		name: "report_finalize",
+		label: "Finalize report",
+		description: `Check and register the report of the running Prelude test. The report (Markdown under .prelude/reports/) needs these sections: ${Object.values(
+			SECTIONS,
+		)
+			.map((s) => s[0])
+			.join(
+				"、",
+			)}. Finding ids (f-001) must appear in the section matching their verdict. On problems the call fails with the full list; fix the report and call again.`,
+		promptSnippet: "Check and register the test report",
+		promptGuidelines: ["Call report_finalize after verify_findings and after writing the report file."],
+		parameters: Type.Object({
+			path: Type.String({ description: "Report path, e.g. .prelude/reports/2026-10-27-order.md" }),
+		}),
+		executionMode: "sequential",
+		defaultActive: false,
+		async execute(_id, params) {
+			const run = prelude.run();
+			const abs = reportFile(run, params.path);
+			const check = checkReport(readFileSync(abs, "utf8"), run.findings());
+			if (check.problems.length) throw new Error(`report not accepted:\n- ${check.problems.join("\n- ")}`);
+
+			const relPath = relative(run.project.root, abs).replace(/\\/g, "/");
+			const state = run.updateState((s) => {
+				s.report = { path: relPath, at: nowIso() };
+				s.phase = "report";
+			});
+			prelude.audit({ event: "report", detail: { path: relPath, defects: check.defects } });
+			updateDisplay(prelude);
+
+			const notes: string[] = [];
+			if (!state.notesReminded && newestMtime(run.project.notesDir) < Date.parse(state.startedAt)) {
+				run.updateState((s) => {
+					s.notesReminded = true;
+				});
+				notes.push(
+					"System notes were not updated during this test: record what you learned about this system in .prelude/notes/ (see AGENTS.md).",
+				);
+			}
+			const summary = [
+				`Report registered: ${relPath}`,
+				`Verified defects: ${check.defects.join(", ") || "none"}; suggestions: ${check.suggestions.join(", ") || "none"}; not reproduced: ${check.unreproduced.join(", ") || "none"}.`,
+				...notes,
+			];
+			return textResult(summary.join("\n"), { path: relPath, ...check });
+		},
+	});
+}

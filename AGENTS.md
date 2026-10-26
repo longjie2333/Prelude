@@ -18,23 +18,26 @@
 ## 技术栈
 
 - TypeScript（ESM，不编译），pi 用 jiti 加载 `src/index.ts`；`tsc` 只做类型检查。Node ≥ 22.19。开发机为 Windows。
-- pi 1.4.0，只用 `@earendil-works/*`；旧的 `@mariozechner/*` 停在 0.73.1，不要引入。API 以 `prelude/node_modules/@earendil-works/pi-coding-agent/` 下的 `dist/**/*.d.ts`、`docs/`、`examples/` 为准；与 plan §1 不一致时回写 §1。
+- pi 1.4.0，只用 `@earendil-works/*`；旧的 `@mariozechner/*` 停在 0.73.1，不要引入。API 以 `node_modules/@earendil-works/pi-coding-agent/` 下的 `dist/**/*.d.ts`、`docs/`、`examples/` 为准；与 plan §1 不一致时回写 §1。
 - pi 各包和 `typebox` 是 peer 依赖（`"*"`，由宿主 pi 提供）；dev 依赖锁精确版本。
 - 存储只用 JSON / JSONL 文件，不用数据库。
 - 测试用 vitest。格式化用 Biome，只开 formatter，并排除 Markdown（Skill 和提示词由人编写，不要被改写）。
 
 ## 目录与命令
 
-代码在 `prelude/`，结构见 plan §4（M1-1 建立）。在 `prelude/` 下执行：
+包就是仓库根目录（D-10），结构见 plan §4。在仓库根目录执行：
 
 ```bash
 npm install          # .npmrc 的 legacy-peer-deps=true 不能删：npm 11 解析 vitest 可选 peer 时会崩溃
 npm run typecheck
 npm run format
-npm test
+npm test             # unit + faux e2e，不调用真实模型
+npm run canary       # 靶场，默认 http://localhost:4100
 ```
 
-在仓库根目录手动试用：`pi -e ./prelude`。
+手动试用：`pi -e <仓库路径>`。在 canary 上做真实运行时，从仓库外的空目录启动 pi（测试模式下闸门对模型隐藏 `canary/`，D-12）。
+
+在 Git Bash 里用 `pi -p "/命令"` 时先设 `MSYS_NO_PATHCONV=1`，否则 `/命令` 会被改写成 Windows 路径，作为普通提示词发给模型。
 
 ## 约定
 
@@ -70,7 +73,7 @@ Never：
 - 让模型直接写 `~/.prelude/kb/`、`.prelude/scope.json`、`.prelude/audit.jsonl`，或放宽闸门对它们的保护。
 - 提交运行时数据：`.prelude/work/`、`evidence/`、`runs/`、`audit.jsonl`。
 - 跳过、删除或放宽断言来让失败的测试通过。
-- 把 canary 的 `bugs.json` 放进模型能看到的地方（Skill、提示词、知识库）。
+- 把 canary 的 `bugs.json` 或 `server.mjs` 里的缺陷说明放进模型能看到的地方（Skill、提示词、知识库）。
 
 ## 多模型协作
 
