@@ -1,0 +1,48 @@
+{
+  "id": "run-20261027-1151-5274",
+  "goal": "测一下 canary（http://localhost:4100，接口文档在 /openapi.json）的下单接口在并发下会不会超卖",
+  "startedAt": "2026-10-27T03:51:46.171Z",
+  "phase": "report",
+  "history": [
+    {
+      "phase": "intake",
+      "at": "2026-10-27T03:51:46.171Z"
+    },
+    {
+      "phase": "intake",
+      "at": "2026-10-27T03:52:25.795Z",
+      "note": "Fetch OpenAPI doc, check environment, ask all missing info at once"
+    },
+    {
+      "phase": "profile",
+      "at": "2026-10-27T03:52:54.961Z",
+      "note": "Explore endpoints, reset, single-order behavior; write notes"
+    },
+    {
+      "phase": "execute",
+      "at": "2026-10-27T03:59:55.715Z",
+      "note": "6 defects recorded (oversell, coupon, pagination, validation, emoji 500, conservation); now verify"
+    },
+    {
+      "phase": "verify",
+      "at": "2026-10-27T04:00:06.673Z",
+      "note": "Independently rerun frozen repro scripts and review"
+    },
+    {
+      "phase": "retro",
+      "at": "2026-10-27T04:04:24.680Z",
+      "note": "Report written; now update notes, add KB lessons and tool"
+    },
+    {
+      "phase": "report",
+      "at": "2026-10-27T04:09:14.889Z",
+      "note": "Report, notes and KB writes done; finalizing"
+    }
+  ],
+  "kbWrites": 4,
+  "report": {
+    "path": ".prelude/reports/2026-10-27-canary-orders.md",
+    "at": "2026-10-27T04:09:14.899Z"
+  },
+  "kbSyncedWrites": 4
+}

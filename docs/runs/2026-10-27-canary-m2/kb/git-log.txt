@@ -1,0 +1,51 @@
+a7bd9a7 kb: add tool rest-api/interleave-probe
+Project: p-61c92801
+Report: .prelude/reports/2026-10-27-canary-oversell.md
+Run: run-20261027-1212-e2b2
+
+exit: 0
+
+b5f3173 kb: revise les-0108 (evidence)
+Project: p-61c92801
+Report: .prelude/reports/2026-10-27-canary-oversell.md
+Run: run-20261027-1212-e2b2
+
+本次再次证实第 (3) 条：NewProduct.name 的 schema 描述为 "Any UTF-8 text"，用 Node fetch 直接发 UTF-8 的 emoji（UTF-16 代理对）时 POST /products 返回 500 {"error":"internal error","detail":"slugify: unexpected surrogate pair"}，既违反"合法输入不得 5xx"，又泄露内部函数名；BMP 非 ASCII（Größe Ünïcode、日本語の商品）与 astral 数学字母均 201，正好把问题定位到代理对处理。第 (2) 条同样命中：Product.stock minimum 为 0，而 POST /products 对 stock=-5 / price="abc" / stock="x" 全部 201 并持久化 price:null、stock:null、stock:-5。
+
+deba6e8 kb: revise les-85a9 (evidence)
+Project: p-61c92801
+Report: .prelude/reports/2026-10-27-canary-oversell.md
+Run: run-20261027-1212-e2b2
+
+本次在 canary（localhost:4100）再次证实，且证实的是它特别提醒的那一步——交错探测：p1 库存 5，顺序下 5 笔 qty=1 卖光后，同时发 5 个 cancel(+1) 与 5 个新下单(-1)，全部成功但终态 stock=4、placedQty=5，stock+placedQty=9≠5，凭空多出 4 件，5/5 轮复现。同一服务的并发下单超卖（2 件库存 10 笔全 201）也复现，说明这两处是不同代码路径、需分别修复；单独并发 cancel 不同订单与同一订单 10 并发 cancel 都正确，证明只有 cancel 与下单交错时才丢失更新。新证据来自第二个项目，可使其升为已确认。
+
+4d4913e kb: add tool rest-api/race-probe
+Project: p-27bf77b4
+Report: .prelude/reports/2026-10-27-canary-orders.md
+Run: run-20261027-1151-5274
+
+exit: 0
+
+4eb4c78 kb: add lesson to rest-api
+Project: p-27bf77b4
+Report: .prelude/reports/2026-10-27-canary-orders.md
+Run: run-20261027-1151-5274
+
+把 OpenAPI 的 schema 和描述文本当作可执行断言，而不只是请求模板
+
+47085af kb: add lesson to rest-api
+Project: p-27bf77b4
+Report: .prelude/reports/2026-10-27-canary-orders.md
+Run: run-20261027-1151-5274
+
+计数器类写接口必须做并发不变量测试，顺序调用会掩盖超卖
+
+c460505 kb: add category rest-api
+Project: p-27bf77b4
+Report: .prelude/reports/2026-10-27-canary-orders.md
+Run: run-20261027-1151-5274
+
+HTTP/JSON services tested through their REST endpoints, usually documented by an OpenAPI/Swagger document: inventory/order/booking/ledger style backends and other stateful APIs where clients create resources and mutate counters, quotas or balances. Excludes browser-driven web apps and non-HTTP interfaces.
+
+93ec36f Initialize Prelude knowledge base
+

@@ -102,7 +102,7 @@ export async function runInit(ctx: ExtensionContext, p: ProjectPaths): Promise<P
  * remote; an empty answer, or no UI, gives a local-only knowledge base.
  */
 export async function runGlobalInit(ctx: ExtensionContext, prelude: Prelude): Promise<void> {
-	const previous = readConfig(prelude.home)?.kb;
+	const previous = readConfig(prelude.preludeHome)?.kb;
 	const remote = previous
 		? previous.remote
 		: ctx.hasUI
@@ -114,7 +114,7 @@ export async function runGlobalInit(ctx: ExtensionContext, prelude: Prelude): Pr
 				)?.trim() || undefined
 			: undefined;
 	const kb = await setupKb(
-		{ home: prelude.home, remote, mainBranch: previous?.mainBranch, branch: previous?.branch },
+		{ home: prelude.preludeHome, remote, mainBranch: previous?.mainBranch, branch: previous?.branch },
 		(e) => prelude.audit(e),
 	);
 	prelude.setKb(kb);

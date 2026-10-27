@@ -1,0 +1,5 @@
+{
+  "name": "rest-api",
+  "dimension": "interface",
+  "description": "HTTP/JSON services tested through their REST endpoints, usually documented by an OpenAPI/Swagger document: inventory/order/booking/ledger style backends and other stateful APIs where clients create resources and mutate counters, quotas or balances. Excludes browser-driven web apps and non-HTTP interfaces."
+}

@@ -2,9 +2,11 @@
 // the canary on :4100, from an empty temp project outside this repo (D-12).
 //
 //   node scripts/run-canary.mjs      RUN_MODEL=provider/model  RUN_GOAL=<text>  RUN_OUT=<dir>  RUN_MINUTES=60
+//                                    PRELUDE_HOME=<dir>  RUN_KB_REMOTE=<git url>
 //
 // No human in the loop: host/install approvals are blocked; questionnaire dialogs get their first
-// option (the model's own default). Output in <out>: events.jsonl, driver.log, summary.json, and
+// option (the model's own default); the knowledge-base remote prompt gets RUN_KB_REMOTE (empty:
+// local only). Set PRELUDE_HOME to keep the run away from the real ~/.prelude. Output in <out>: events.jsonl, driver.log, summary.json, and
 // a copy of the project's .prelude/.
 import { spawn } from "node:child_process";
 import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -44,7 +46,9 @@ const log = (line) => {
 
 const canary = createCanary({ bugs: new Set(["B1", "B2", "B3"]) });
 await new Promise((r) => canary.listen(PORT, "127.0.0.1", r));
-log(`canary :${PORT} (B1,B2,B3); project ${ROOT}; model ${MODEL}`);
+log(
+	`canary :${PORT} (B1,B2,B3); project ${ROOT}; model ${MODEL}; PRELUDE_HOME ${process.env.PRELUDE_HOME ?? "(real home)"}`,
+);
 
 const started = Date.now();
 const pi = spawn(process.execPath, [CLI, "--mode", "rpc", "--no-session", "-ne", "-e", PKG, "--model", MODEL], {
@@ -73,6 +77,8 @@ function answer(ev) {
 		return opts.length ? { value: opts[0] } : { cancelled: true };
 	}
 	if (ev.method === "confirm") return { confirmed: false };
+	if (ev.method === "input" && /knowledge base/i.test(ev.title ?? ""))
+		return { value: process.env.RUN_KB_REMOTE ?? "" };
 	return { cancelled: true };
 }
 

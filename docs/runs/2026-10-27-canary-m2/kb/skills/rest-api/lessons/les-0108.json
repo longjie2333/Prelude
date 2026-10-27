@@ -1,0 +1,55 @@
+{
+  "id": "les-0108",
+  "title": "把 OpenAPI 的 schema 和描述文本当作可执行断言，而不只是请求模板",
+  "applies_when": "接口文档是唯一的行为契约来源（OpenAPI/Swagger），且其 schema 与描述文本里含有可判定的不变量：minimum/maximum、required、枚举、以及 \"every item appears on exactly one page\"、\"never goes below zero\" 这类明文断言",
+  "not_applies_when": [
+    "没有接口文档，预期值只能靠猜——此时不要用这条，改为记录行为观察而非缺陷",
+    "文档本身没有可判定的不变量描述（只有 summary，没有 schema 约束）",
+    "接口明确声明为实验性/无契约（如 /debug 端点）"
+  ],
+  "guidance": "把文档里的每一句明文断言都变成一条可执行断言，而不是只看接口通不通：(1) 分页接口要遍历所有页，比对并集唯一 id 数与 total，并对缺失 id 调单条 GET 证明它确实存在（排除分页窗口伪影）；(2) 创建接口要把返回对象按响应 schema 校验一遍（如 stock 的 minimum 为 0、price 必须是 number），服务端把非法输入 201 出来比直接拒绝更隐蔽；(3) name/文本字段按文档声明的字符集测非 ASCII，务必用 Node fetch 直接发 UTF-8，不要用 shell 传中文（Git Bash 会破坏编码导致误判），并专门测 astral-plane/emoji 字符（UTF-16 代理对）——这类输入常让 slugify 之类的字符串处理抛 500 并泄露内部实现细节。合法输入得到 5xx 一律记为缺陷。",
+  "status": "confirmed",
+  "evidence": [
+    {
+      "project": "p-27bf77b4",
+      "report": ".prelude/reports/2026-10-27-canary-orders.md",
+      "finding": "f-003",
+      "at": "2026-10-27"
+    },
+    {
+      "project": "p-27bf77b4",
+      "report": ".prelude/reports/2026-10-27-canary-orders.md",
+      "finding": "f-004",
+      "at": "2026-10-27"
+    },
+    {
+      "project": "p-27bf77b4",
+      "report": ".prelude/reports/2026-10-27-canary-orders.md",
+      "finding": "f-005",
+      "at": "2026-10-27"
+    },
+    {
+      "project": "p-61c92801",
+      "report": ".prelude/reports/2026-10-27-canary-oversell.md",
+      "finding": "f-005",
+      "at": "2026-10-27"
+    }
+  ],
+  "revisions": [
+    {
+      "at": "2026-10-27T04:33:07.921Z",
+      "project": "p-61c92801",
+      "kind": "evidence",
+      "reason": "本次再次证实第 (3) 条：NewProduct.name 的 schema 描述为 \"Any UTF-8 text\"，用 Node fetch 直接发 UTF-8 的 emoji（UTF-16 代理对）时 POST /products 返回 500 {\"error\":\"internal error\",\"detail\":\"slugify: unexpected surrogate pair\"}，既违反\"合法输入不得 5xx\"，又泄露内部函数名；BMP 非 ASCII（Größe Ünïcode、日本語の商品）与 astral 数学字母均 201，正好把问题定位到代理对处理。第 (2) 条同样命中：Product.stock minimum 为 0，而 POST /products 对 stock=-5 / price=\"abc\" / stock=\"x\" 全部 201 并持久化 price:null、stock:null、stock:-5。",
+      "before": {
+        "guidance": "把文档里的每一句明文断言都变成一条可执行断言，而不是只看接口通不通：(1) 分页接口要遍历所有页，比对并集唯一 id 数与 total，并对缺失 id 调单条 GET 证明它确实存在（排除分页窗口伪影）；(2) 创建接口要把返回对象按响应 schema 校验一遍（如 stock 的 minimum 为 0、price 必须是 number），服务端把非法输入 201 出来比直接拒绝更隐蔽；(3) name/文本字段按文档声明的字符集测非 ASCII，务必用 Node fetch 直接发 UTF-8，不要用 shell 传中文（Git Bash 会破坏编码导致误判），并专门测 astral-plane/emoji 字符（UTF-16 代理对）——这类输入常让 slugify 之类的字符串处理抛 500 并泄露内部实现细节。合法输入得到 5xx 一律记为缺陷。",
+        "not_applies_when": [
+          "没有接口文档，预期值只能靠猜——此时不要用这条，改为记录行为观察而非缺陷",
+          "文档本身没有可判定的不变量描述（只有 summary，没有 schema 约束）",
+          "接口明确声明为实验性/无契约（如 /debug 端点）"
+        ],
+        "status": "candidate"
+      }
+    }
+  ]
+}

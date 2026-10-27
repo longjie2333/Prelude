@@ -1,7 +1,9 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { toolSource } from "../../src/kb/api.ts";
 import { runSelfcheck, toolProblems } from "../../src/kb/tools.ts";
+import { Run } from "../../src/run.ts";
 import { type TempProject, tempProject } from "../helpers.ts";
 
 let p: TempProject;
@@ -41,5 +43,14 @@ describe("tool intake (M2-6)", () => {
 		expect((await runSelfcheck(dir, 10_000)).ok).toBe(false);
 		writeFileSync(join(dir, "selfcheck.mjs"), "setTimeout(() => {}, 30_000)");
 		expect(await runSelfcheck(dir, 500)).toMatchObject({ ok: false, output: expect.stringMatching(/killed/) });
+	});
+});
+
+describe("tool source path", () => {
+	it("accepts a bare name under .prelude/work/ as well as a project-relative path", () => {
+		const run = new Run(p.paths, "run-1");
+		expect(toolSource(run, "burst")).toBe(dir);
+		expect(toolSource(run, ".prelude/work/burst")).toBe(dir);
+		expect(toolSource(run, "src")).toBe(join(p.root, "src"));
 	});
 });

@@ -46,6 +46,15 @@ export class Prelude {
 		return this.options.home ?? homedir();
 	}
 
+	/**
+	 * Parent of `.prelude/` (config, knowledge base). `PRELUDE_HOME` moves it without moving
+	 * `home`, so a test run cannot touch the user's real knowledge base while the credential
+	 * paths the gate protects stay where they are.
+	 */
+	get preludeHome(): string {
+		return this.options.home ?? process.env.PRELUDE_HOME ?? homedir();
+	}
+
 	get agentDir(): string {
 		return this.options.agentDir ?? getAgentDir();
 	}
@@ -72,9 +81,9 @@ export class Prelude {
 	/** The knowledge base from `~/.prelude/config.json`, or undefined before /prelude-init set it up. */
 	kb(): Kb | undefined {
 		if (this.kbInstance) return this.kbInstance;
-		const config = readConfig(this.home)?.kb;
+		const config = readConfig(this.preludeHome)?.kb;
 		if (!config || !existsSync(join(config.dir, ".git"))) return undefined;
-		this.kbInstance = new Kb(config, (e) => this.audit(e), this.home);
+		this.kbInstance = new Kb(config, (e) => this.audit(e), this.preludeHome);
 		return this.kbInstance;
 	}
 
@@ -96,7 +105,7 @@ export class Prelude {
 			cwd,
 			home: this.home,
 			project,
-			kbDir: this.kb()?.dir ?? globalPaths(this.home).kbDir,
+			kbDir: this.kb()?.dir ?? globalPaths(this.preludeHome).kbDir,
 			agentDir: this.agentDir,
 			extensionDir: EXTENSION_DIR,
 			canaryDir: CANARY_DIR,

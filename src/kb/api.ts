@@ -56,6 +56,17 @@ function evidenceFor(s: Source, findings: string[]): Evidence[] {
 	});
 }
 
+/**
+ * The tool directory: absolute, relative to the project root, or (as a real run passed it) a bare
+ * name under `.prelude/work/`.
+ */
+export function toolSource(run: Run, source: string): string {
+	if (isAbsolute(source)) return source;
+	const fromRoot = resolve(run.project.root, source);
+	const fromWork = resolve(run.project.workDir, source);
+	return !existsSync(fromRoot) && existsSync(fromWork) ? fromWork : fromRoot;
+}
+
 function message(action: string, s: Source, summary: string): string {
 	return `kb: ${action}\n\nProject: ${s.project}\nReport: ${s.report}\nRun: ${s.run.id}\n\n${summary}`;
 }
@@ -210,7 +221,7 @@ export function createKbTools(prelude: Prelude) {
 			const kbDir = prelude.requireKb().dir;
 			requireCategory(kbDir, p.category);
 			if (!TOOL_NAME.test(p.name)) throw new Error("tool name: lowercase letters, digits and single hyphens");
-			const src = isAbsolute(p.source) ? p.source : resolve(s.run.project.root, p.source);
+			const src = toolSource(s.run, p.source);
 			const c = (x: string) => canonicalPath(x, s.run.project.root);
 			if (!isInside(c(src), c(s.run.project.workDir)))
 				throw new Error("the tool must be a directory under .prelude/work/");

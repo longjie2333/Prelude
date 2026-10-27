@@ -1,0 +1,53 @@
+{
+  "id": "run-20261027-1212-e2b2",
+  "goal": "测一下 canary（http://localhost:4100，接口文档在 /openapi.json）的下单接口在并发下会不会超卖",
+  "startedAt": "2026-10-27T04:12:52.546Z",
+  "phase": "retro",
+  "history": [
+    {
+      "phase": "intake",
+      "at": "2026-10-27T04:12:52.546Z"
+    },
+    {
+      "phase": "intake",
+      "at": "2026-10-27T04:13:53.120Z",
+      "note": "读 test-pilot 与 rest-api 类别经验，取 /openapi.json，确认授权范围，一次性问完缺少的信息"
+    },
+    {
+      "phase": "profile",
+      "at": "2026-10-27T04:13:57.801Z",
+      "note": "探索接口行为：reset、products、orders、coupons、cancel，确认守卫与重置能力，写 notes"
+    },
+    {
+      "phase": "execute",
+      "at": "2026-10-27T04:15:16.016Z",
+      "note": "按计划执行：/orders 并发超卖、/coupons claim 并发、cancel 与下单交错、分页不变量"
+    },
+    {
+      "phase": "verify",
+      "at": "2026-10-27T04:25:38.757Z",
+      "note": "执行完成：6 个缺陷 + 1 条建议；进入复验，独立重跑所有复现脚本"
+    },
+    {
+      "phase": "report",
+      "at": "2026-10-27T04:31:26.909Z",
+      "note": "6 个缺陷全部 confirmed、建议 f-007 被拒；写报告并更新笔记"
+    },
+    {
+      "phase": "retro",
+      "at": "2026-10-27T04:32:34.284Z",
+      "note": "报告已写；复盘：更新系统笔记，向 rest-api 知识库追加证据与一条新经验"
+    },
+    {
+      "phase": "retro",
+      "at": "2026-10-27T04:36:24.080Z",
+      "note": "报告已注册；复盘完成（2 条经验追加证据、1 个工具入库、笔记更新）"
+    }
+  ],
+  "kbWrites": 3,
+  "report": {
+    "path": ".prelude/reports/2026-10-27-canary-oversell.md",
+    "at": "2026-10-27T04:36:20.004Z"
+  },
+  "kbSyncedWrites": 3
+}
