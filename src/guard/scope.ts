@@ -1,7 +1,7 @@
 /**
  * Authorization scope (design §9, plan M1-5), adapted from pi-testmode src/kernel/scope.ts
- * (commit f5d01c7). `scope.json` is human-maintained: the model can never write it; code adds a
- * target only after the user approved it in a dialog (D-11).
+ * (commit f5d01c7). The model asks for authorization with `scope_request`; the user decides in a
+ * dialog; code writes what the user approved (D-11, D-29). The model can never write the file.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { StringEnum } from "@earendil-works/pi-ai";
@@ -25,8 +25,8 @@ export const ScopeSchema = Type.Object({
 	limits: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
 	data: Type.Optional(Type.Object({ policy: Type.String() })),
 	/**
-	 * Set by the user when pi itself runs inside a disposable Windows Sandbox or VM: installing the
-	 * program under test is then allowed (D-27). The model can never write scope.json.
+	 * pi itself runs inside a disposable Windows Sandbox or VM, as the user confirmed: installing
+	 * the program under test is then allowed (D-27, D-29).
 	 */
 	isolated_host: Type.Optional(Type.Boolean()),
 	egress_allowlist: Type.Optional(Type.Array(Type.String())),
@@ -56,14 +56,45 @@ export function loadScope(path: string): ScopeLoad {
 	}
 }
 
-/** Adds a user-approved target (D-11). Refuses to overwrite a file that does not parse. */
-export function addScopeTarget(path: string, host: string, allowed: TestKind[] = ["functional"]): Scope {
+/** What the user approved in one authorization dialog; merged into scope.json by code (D-29). */
+export interface ScopeGrant {
+	targets?: Array<{ host: string; allowed: TestKind[]; envs?: string[]; limits?: Record<string, unknown> }>;
+	egress?: string[];
+	isolatedHost?: boolean;
+}
+
+/**
+ * Merges an approved grant into scope.json: test kinds and envs are added to an existing target,
+ * nothing is ever removed. Refuses to overwrite a file that does not parse.
+ */
+export function applyScopeGrant(path: string, grant: ScopeGrant): Scope {
 	const loaded = loadScope(path);
-	if (loaded.error) throw new Error(`${loaded.error}; fix it by hand before adding targets`);
+	if (loaded.error) throw new Error(`${loaded.error}; the user has to fix the file before more is granted`);
 	const scope: Scope = loaded.scope ?? { targets: [] };
-	if (!scope.targets.some((t) => t.host === host)) scope.targets.push({ host, allowed });
+	for (const g of grant.targets ?? []) {
+		const t = scope.targets.find((x) => x.host === g.host);
+		if (!t) {
+			scope.targets.push({
+				host: g.host,
+				allowed: [...new Set(g.allowed)],
+				...(g.envs?.length ? { envs: g.envs } : {}),
+			});
+		} else {
+			t.allowed = [...new Set([...t.allowed, ...g.allowed])];
+			if (g.envs?.length) t.envs = [...new Set([...(t.envs ?? []), ...g.envs])];
+		}
+		if (g.limits && Object.keys(g.limits).length) scope.limits = { ...(scope.limits ?? {}), [g.host]: g.limits };
+	}
+	if (grant.egress?.length)
+		scope.egress_allowlist = [...new Set([...(scope.egress_allowlist ?? []), ...grant.egress])];
+	if (grant.isolatedHost) scope.isolated_host = true;
 	writeJson(path, scope);
 	return scope;
+}
+
+/** Adds one user-approved host as functional (the out-of-scope host dialog, D-11). */
+export function addScopeTarget(path: string, host: string, allowed: TestKind[] = ["functional"]): Scope {
+	return applyScopeGrant(path, { targets: [{ host, allowed }] });
 }
 
 /** Extracts `host` and optional port from a URL, `host:port`, or bare host. */

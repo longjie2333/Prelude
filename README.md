@@ -58,11 +58,27 @@ pi install /path/to/prelude
 1. 在项目里建 `.prelude/`，问你系统笔记和报告是否纳入版本管理，并在 `AGENTS.md` 里加一段 Prelude 说明。
 2. 问知识库的 git 远程地址（留空 = 只在本机）。克隆或初始化 `~/.prelude/kb/`，并为这台机器建一个自己的分支 `kb/<用户>-<主机>-<4位码>`。
 
-之后模型会读方法论，**一次性**问完缺的信息（环境、账号、允许的操作），然后不再打断你，直到交付报告。运行中你仍然可以输入消息引导它：`Enter` 在当前一步结束后生效，`Alt+Enter` 在整个任务结束后生效。
+之后模型会读方法论，**一次性**问完缺的信息（环境、账号）并申请需要的授权（见下文），然后不再打断你，直到交付报告。运行中你仍然可以输入消息引导它：`Enter` 在当前一步结束后生效，`Alt+Enter` 在整个任务结束后生效。
 
-### 授权范围 `.prelude/scope.json`
+### 授权
 
-只能由人维护，模型写入一律被拦截。模型访问不在其中的主机时会弹窗问你，选"Add to scope.json"会以 `functional` 加入。
+不需要手写配置。测试开始时，模型会根据目标列出需要的授权（哪些主机、做哪些类型的测试、强度上限、还要访问哪些主机），用对话框逐项问你：
+
+```
+Authorize staging.example.com for: functional, load?
+Environment: staging
+Limits: {"max_concurrency":50}
+Reason: 下单接口要验证并发下的库存守恒
+  > Allow functional, load
+    Allow functional only
+    Decline
+```
+
+你批准的部分由 Prelude 写入 `.prelude/scope.json`，拒绝的部分模型不会再尝试，会写进报告的"没测什么"。授权只增不减；要收回授权，编辑或删除这个文件即可。没有界面（print 模式）时不授予任何授权。
+
+测试中途模型要访问未授权的主机时，也会弹窗问你：选"Add to scope.json"以 `functional` 加入，选"Allow this session"只在本次会话有效。
+
+模型不能直接写 `scope.json`，写入一律被闸门拦截。文件格式如下：
 
 ```json
 {
@@ -77,9 +93,10 @@ pi install /path/to/prelude
 | 字段 | 含义 |
 |---|---|
 | `targets[].host` | `host` 或 `host:port`；`*.example.com` 匹配子域名；`localhost`、`127.0.0.1`、`::1` 互相等价 |
-| `targets[].allowed` | `functional`、`load`、`security-check`、`destructive`。安全扫描器（nuclei、ZAP、sqlmap、ffuf、nmap 等）只能对带 `security-check` 的目标运行，弹窗批准不会授予它 |
+| `targets[].allowed` | `functional`、`load`、`security-check`、`destructive`。安全扫描器（nuclei、ZAP、sqlmap、ffuf、nmap 等）只能对带 `security-check` 的目标运行；访问主机时的批准弹窗不会授予它 |
+| `limits` | 按主机记录申请时写明的强度上限 |
 | `egress_allowlist` | 不算测试目标、但允许访问的主机（例如包仓库） |
-| `isolated_host` | 设为 `true` 表示 pi 本身运行在一次性的 Windows Sandbox 或虚拟机里，允许在本机安装被测程序；默认在测试模式下拦截 |
+| `isolated_host` | 你确认过 pi 本身运行在一次性的 Windows Sandbox 或虚拟机里：允许在本机安装被测程序，否则测试模式下拦截 |
 
 ### 命令
 
@@ -90,14 +107,14 @@ pi install /path/to/prelude
 | `/prelude-sync` | 立即同步知识库：合入远程 main（有冲突逐个文件问你），再推送 |
 | `/prelude-kb` | 列出知识库的类别和经验，标出长期未被证实和疑似重复的经验 |
 
-测试模式下模型多了这些工具：`questionnaire`、`test_progress`、`finding_record`、`verify_findings`、`report_finalize`，以及有知识库时的 `kb_category_add`、`kb_lesson_add`、`kb_lesson_revise`、`kb_tool_add`。
+测试模式下模型多了这些工具：`questionnaire`、`scope_request`、`test_progress`、`finding_record`、`verify_findings`、`report_finalize`，以及有知识库时的 `kb_category_add`、`kb_lesson_add`、`kb_lesson_revise`、`kb_tool_add`。
 
 ### 产出
 
 ```
 <项目>/.prelude/
 ├── project.json   # 项目 id
-├── scope.json     # 授权范围（人工维护）
+├── scope.json     # 授权范围（你批准后由 Prelude 写入）
 ├── notes/         # 系统笔记（模型写）
 ├── reports/       # 测试报告
 ├── work/          # 模型的脚本和草稿

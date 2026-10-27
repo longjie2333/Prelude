@@ -5,6 +5,7 @@
  */
 import type { ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import { Prelude, type PreludeOptions } from "./context.ts";
+import { createScopeRequestTool } from "./authorize.ts";
 import { createKbTools } from "./kb/api.ts";
 import { registerMode } from "./mode.ts";
 import { createFindingRecordTool, createTestProgressTool } from "./progress.ts";
@@ -20,6 +21,7 @@ export function createPrelude(options: PreludeOptions = {}, onCreate?: (p: Prelu
 		onCreate?.(prelude);
 		prelude.gate()(pi);
 		questionnaire(pi);
+		pi.registerTool(createScopeRequestTool(prelude));
 		pi.registerTool(createTestProgressTool(prelude));
 		pi.registerTool(createFindingRecordTool(prelude));
 		pi.registerTool(createVerifyFindingsTool(prelude));

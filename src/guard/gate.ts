@@ -42,6 +42,7 @@ const WRITE_TOOLS = new Set(["write", "edit"]);
 const SHELL_TOOLS = new Set(["bash", "powershell"]);
 /** Tools whose effects are Prelude's own code, or that only load or call other (gated) tools. */
 const TRUSTED_TOOLS = new Set([
+	"scope_request",
 	"test_progress",
 	"finding_record",
 	"verify_findings",
@@ -83,7 +84,7 @@ export function writeDenial(ctx: GateContext, rawPath: string): string | undefin
 	const c = (x: string) => canonicalPath(x, ctx.cwd, ctx.home);
 	const p = c(rawPath);
 	const P = ctx.project;
-	if (p === c(P.scopeFile)) return "scope.json is maintained by the user only";
+	if (p === c(P.scopeFile)) return "scope.json is changed only through scope_request, after the user approves";
 	if (p === c(P.auditFile)) return "audit.jsonl is written by Prelude only";
 	if (p === c(P.projectFile)) return "project.json is written by /prelude-init only";
 	if (isInside(p, c(P.runsDir))) return "run state is written by Prelude tools only (finding_record, verify_findings)";
@@ -130,7 +131,7 @@ function evaluateShell(command: string, ctx: GateContext, tool: string): GateDec
 		return block("the canary is a system under test: test it through its interface, not its source");
 	if (a.hostInstall && !ctx.scope?.isolated_host)
 		return block(
-			`installing ${a.hostInstall} on this host is blocked: run packaged programs in Windows Sandbox, a VM or an emulator (design §9); if pi already runs inside one, the user can set isolated_host in .prelude/scope.json`,
+			`installing ${a.hostInstall} on this host is blocked: run packaged programs in Windows Sandbox, a VM or an emulator (design §9); if pi already runs inside one, ask the user to confirm it with scope_request (isolated_host)`,
 		);
 	if (a.scanner) {
 		const denial = scannerDenial(ctx, a.scanner, a.hosts);
@@ -150,7 +151,7 @@ function scannerDenial(ctx: GateContext, scanner: string, hosts: string[]): stri
 		return `${scanner} without a target URL or host:port in the command: name the target so its security-check authorization can be checked`;
 	const unauthorized = hosts.filter((h) => !findScopeTarget(ctx.scope, h)?.allowed.includes("security-check"));
 	if (unauthorized.length)
-		return `${scanner} needs security-check for ${unauthorized.join(", ")} in .prelude/scope.json; only the user can grant it. Record it under 没测什么`;
+		return `${scanner} needs security-check for ${unauthorized.join(", ")} in .prelude/scope.json; ask the user with scope_request; if declined, record it under 没测什么`;
 	return undefined;
 }
 

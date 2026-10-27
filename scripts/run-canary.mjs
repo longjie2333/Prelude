@@ -4,7 +4,7 @@
 //   node scripts/run-canary.mjs      RUN_MODEL=provider/model  RUN_GOAL=<text>  RUN_OUT=<dir>  RUN_MINUTES=60
 //                                    PRELUDE_HOME=<dir>  RUN_KB_REMOTE=<git url>  RUN_BASELINE=1
 //
-// No human in the loop: host/install approvals are blocked; questionnaire dialogs get their first
+// No human in the loop: host/install approvals and scope_request dialogs are declined; questionnaire dialogs get their first
 // option (the model's own default); the knowledge-base remote prompt gets RUN_KB_REMOTE (empty:
 // local only). Set PRELUDE_HOME to keep the run away from the real ~/.prelude. Output in <out>: events.jsonl, driver.log, summary.json, and
 // a copy of the project's .prelude/.
@@ -91,7 +91,9 @@ function answer(ev) {
 		const install = String(ev.title ?? "").match(/^Allow install (\S+)\?/);
 		if (install && ALLOW_INSTALL?.test(install[1]) && opts.includes("Allow this session"))
 			return { value: "Allow this session" };
-		const deny = opts.find((o) => o === "Block");
+		const deny = opts.find((o) => o === "Block" || o === "Decline");
+		// scope_request dialogs (D-29): the driver stands in for a user who authorized only what
+		// RUN_TARGET/RUN_ALLOWED wrote, so every further request is declined.
 		if (deny) return { value: deny };
 		return opts.length ? { value: opts[0] } : { cancelled: true };
 	}

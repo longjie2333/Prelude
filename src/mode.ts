@@ -26,7 +26,14 @@ export const PROMPT_SECTION = "prelude";
 export const TEST_PILOT = join(SKILLS_DIR, "test-pilot", "SKILL.md");
 export const KB_TOOLS = ["kb_category_add", "kb_lesson_add", "kb_lesson_revise", "kb_tool_add"];
 /** Tools Prelude adds while a test runs; everything the user had stays active. */
-export const MODE_TOOLS = ["questionnaire", "test_progress", "finding_record", "verify_findings", "report_finalize"];
+export const MODE_TOOLS = [
+	"questionnaire",
+	"scope_request",
+	"test_progress",
+	"finding_record",
+	"verify_findings",
+	"report_finalize",
+];
 
 interface PersistedState {
 	enabled: boolean;
@@ -71,13 +78,13 @@ export function promptSection(prelude: Prelude): string {
 		`Prelude 测试模式已开启。运行 ${run.id}，目标：${state.goal || "（见用户下一条消息）"}`,
 		"",
 		`- 先读 test-pilot Skill（${testPilotPath(prelude).replace(/\\/g, "/")}），按它的流程做完整个测试。`,
-		"- 接收阶段用 questionnaire 一次性问完所有缺少的信息；之后不再询问用户，自己判断并在报告里写明假设。",
+		"- 接收阶段一次性问完：缺少的信息用 questionnaire，测试需要的授权（目标、测试类型、强度）用 scope_request；之后不再询问用户，自己判断并在报告里写明假设。",
 		"- 阶段切换调用 test_progress；每个发现确认后立刻用 finding_record 记录（缺陷必须带复现脚本：退出码非 0 = 复现），不要攒到最后。",
 		"- 会改被测系统状态的探测（下单、写入、重置）一次只跑一个，不要并行。",
 		`- 测完调用 verify_findings，把报告写到 ${rel(run.project.reportsDir)}/，复盘，最后调用 report_finalize。`,
 		`- 系统笔记写在 ${rel(run.project.notesDir)}/，脚本和草稿放在 ${rel(run.project.workDir)}/。`,
 		...kbLines(prelude),
-		`- 授权范围（.prelude/scope.json，只能由人维护）：${targets || (scope.error ? `无效：${scope.error}` : "尚未配置")}。访问范围外的主机、首次安装依赖需要用户批准；被拒绝就不要重试，记入"没测什么"。`,
+		`- 当前授权：${targets || (scope.error ? `scope.json 无效：${scope.error}` : "尚无，接收阶段用 scope_request 申请")}${scope.scope?.isolated_host ? "；已确认在一次性隔离环境中" : ""}。授权只能经 scope_request 由用户批准后写入，不能直接改 .prelude/scope.json。访问未授权的主机、首次安装依赖也需要用户批准；被拒绝就不要重试，记入"没测什么"。`,
 		"- 隔离级别：仅工具层策略（Prelude 的闸门），不是安全边界。",
 	].join("\n");
 }

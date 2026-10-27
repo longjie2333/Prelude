@@ -36,6 +36,7 @@ it("loads from the package root with its tools and commands", async () => {
 		"kb_tool_add",
 		"questionnaire",
 		"report_finalize",
+		"scope_request",
 		"test_progress",
 		"verify_findings",
 	]);

@@ -29,7 +29,7 @@ export const AGENTS_SECTION = `${AGENTS_BEGIN}
 
 - 测试开始时先读这些笔记；测试中发现新事实（接口、角色与权限、数据流、技术栈、环境差异、已知问题和坑），就更新对应笔记。
 - 笔记写这个系统本身。跨项目通用的经验不写在这里，复盘时通过 Prelude 的知识库工具提交。
-- \`.prelude/scope.json\` 是授权范围，只能由人维护。
+- \`.prelude/scope.json\` 是授权范围：测试开始时模型会列出需要的授权请你确认，确认的内容由 Prelude 写入。不要让模型直接改这个文件。
 ${AGENTS_END}`;
 
 export function readProject(p: ProjectPaths): ProjectInfo | undefined {
@@ -91,7 +91,7 @@ export async function runInit(ctx: ExtensionContext, p: ProjectPaths): Promise<P
 	const track = await askTrack(ctx, readProject(p)?.track);
 	const info = initProject(p, track);
 	ctx.ui.notify(
-		`Prelude initialized: project ${info.id}${existsSync(p.scopeFile) ? "" : ". Targets are added to .prelude/scope.json as you approve them"}`,
+		`Prelude initialized: project ${info.id}${existsSync(p.scopeFile) ? "" : ". The test will ask you for the authorization it needs"}`,
 		"info",
 	);
 	return info;

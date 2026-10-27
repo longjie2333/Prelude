@@ -245,7 +245,7 @@ describe("a Prelude test run", () => {
 		expect(TEST_PILOT).toContain("test-pilot");
 
 		// Gate blocks and the audit chain (M1 acceptance 4).
-		expect(blocked[0]).toMatch(/scope\.json is maintained by the user only/);
+		expect(blocked[0]).toMatch(/scope\.json is changed only through scope_request, after the user approves/);
 		expect(blocked[1]).toMatch(/localhost:1 is not in \.prelude\/scope\.json; no user is present/);
 		expect(blocked[2]).toMatch(/Report registered.*Verified defects: f-001/s);
 		expect(blocked[2]).toMatch(/System notes were not updated/);
@@ -350,6 +350,27 @@ describe("a Prelude test run", () => {
 		await session.prompt("继续");
 		expect(resumed.seen[0].actor).toBe("main");
 		expect(resumed.seen[0].tools).toContain("finding_record");
+	});
+
+	it("grants nothing through scope_request when no user is present", async () => {
+		const results: string[] = [];
+		const before = readFileSync(p.paths.scopeFile, "utf8");
+		const router = createRouter(p.base, {
+			main: [
+				call("scope_request", {
+					reason: "need load testing",
+					targets: [{ host: `localhost:${canary.port}`, allowed: ["load", "security-check"] }],
+				}),
+				(ctx) => {
+					results.push(ctx.lastToolResult().text);
+					return say("ok")(ctx);
+				},
+			],
+		});
+		session = await mainSession(router);
+		await runCommand(session, `/test ${canary.url}`);
+		expect(results[0]).toMatch(/no user is present to authorize anything/);
+		expect(readFileSync(p.paths.scopeFile, "utf8")).toBe(before);
 	});
 
 	it("is off outside /test: no prompt section, no test tools, no test-pilot", async () => {

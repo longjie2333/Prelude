@@ -75,7 +75,7 @@ Ask first：
 
 Never：
 - 读取、打印或提交凭据：`~/.pi/agent/auth.json`、`.env*`、API key、git 凭据。
-- 让模型直接写 `~/.prelude/kb/`、`.prelude/scope.json`、`.prelude/audit.jsonl`，或放宽闸门对它们的保护。
+- 让模型直接写 `~/.prelude/kb/`、`.prelude/scope.json`、`.prelude/audit.jsonl`，或放宽闸门对它们的保护。`scope.json` 只经 `scope_request` 在用户批准后由代码写入（D-29）；不要加任何不经用户确认就扩大授权的路径。
 - 提交运行时数据：`.prelude/work/`、`evidence/`、`runs/`、`audit.jsonl`。
 - 跳过、删除或放宽断言来让失败的测试通过。
 - 把 canary 的 `bugs.json` 或 `server.mjs` 里的缺陷说明放进模型能看到的地方（Skill、提示词、知识库）。
