@@ -37,7 +37,8 @@ export function promptSection(prelude: Prelude): string {
 
 - 先读 test-pilot Skill（${TEST_PILOT.replace(/\\/g, "/")}），按它的流程做完整个测试。
 - 接收阶段用 questionnaire 一次性问完所有缺少的信息；之后不再询问用户，自己判断并在报告里写明假设。
-- 阶段切换调用 test_progress；每个发现立刻用 finding_record 记录（缺陷必须带复现脚本：退出码非 0 = 复现）。
+- 阶段切换调用 test_progress；每个发现确认后立刻用 finding_record 记录（缺陷必须带复现脚本：退出码非 0 = 复现），不要攒到最后。
+- 会改被测系统状态的探测（下单、写入、重置）一次只跑一个，不要并行。
 - 测完调用 verify_findings，再把报告写到 ${rel(run.project.reportsDir)}/，最后调用 report_finalize。
 - 系统笔记写在 ${rel(run.project.notesDir)}/，脚本和草稿放在 ${rel(run.project.workDir)}/。
 - 授权范围（.prelude/scope.json，只能由人维护）：${targets || (scope.error ? `无效：${scope.error}` : "尚未配置")}。访问范围外的主机、首次安装依赖需要用户批准；被拒绝就不要重试，记入"没测什么"。

@@ -66,7 +66,14 @@ export function createTestProgressTool(prelude: Prelude) {
 			const state = run.setPhase(params.phase, params.note);
 			prelude.audit({ event: "phase", detail: { phase: params.phase } });
 			updateDisplay(prelude);
-			return textResult(`Phase: ${state.phase}`, { phase: state.phase });
+			// The Skill time-boxes phases; the model has no clock of its own.
+			const minutes = Math.round((Date.now() - Date.parse(state.startedAt)) / 60_000);
+			const findings = run.findings().length;
+			return textResult(`Phase: ${state.phase}. Elapsed: ${minutes} min. Findings recorded: ${findings}.`, {
+				phase: state.phase,
+				minutes,
+				findings,
+			});
 		},
 	});
 }
