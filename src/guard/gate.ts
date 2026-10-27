@@ -128,9 +128,9 @@ function evaluateShell(command: string, ctx: GateContext, tool: string): GateDec
 	if (!ctx.testMode) return ALLOW;
 	if (mentionsCanary(command, ctx))
 		return block("the canary is a system under test: test it through its interface, not its source");
-	if (a.hostInstall)
+	if (a.hostInstall && !ctx.scope?.isolated_host)
 		return block(
-			`installing ${a.hostInstall} on this host is blocked: run packaged programs in Windows Sandbox, a VM or an emulator (design §9)`,
+			`installing ${a.hostInstall} on this host is blocked: run packaged programs in Windows Sandbox, a VM or an emulator (design §9); if pi already runs inside one, the user can set isolated_host in .prelude/scope.json`,
 		);
 	if (a.scanner) {
 		const denial = scannerDenial(ctx, a.scanner, a.hosts);

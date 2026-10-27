@@ -88,6 +88,8 @@
 | D-24 | M3-5 评测的"直接对话"组用同一个驱动 `RUN_BASELINE=1`：同模型、同目标、同 canary，不加载 Prelude，结果从 events.jsonl 人工评分 | 两组只差 Prelude 本身 |
 | D-25 | 测试模式下，没有设超时的 bash / powershell 调用默认 600 秒（在 `tool_call` 中改写入参）；模型自己设的超时不变 | pi 的 shell 工具没有默认超时；真实运行中一个启动了 Chromium 的命令 13 分钟没有返回 |
 | D-26 | `finding_record` 的 `id` 等于下一个编号时按新增处理；其他不存在的 id 报错并列出已有 id | 真实运行中模型用 `id` 给新发现编号，25 次调用失败 11 次；参数名和语义不变，只放宽这一种无歧义的情况 |
+| D-27 | `scope.json` 可以设 `isolated_host: true`：pi 本身运行在一次性的 Sandbox 或虚拟机里，测试模式下不再拦截在本机安装被测程序 | M3-4 只能在隔离环境里装 exe；该字段只能由人写，和 `scope.json` 的其余部分一样 |
+| D-28 | M3 的真实运行由测试人员自行执行（[m3-guide.md](m3-guide.md)），结果用 `scripts/collect-run.mjs` 整理进 `docs/runs/` | 用户决定；需要真实的环境、目标和对结果真伪的判断 |
 
 ## 4. 代码结构
 
@@ -218,7 +220,7 @@
 
 ## 10. 交接
 
-**当前状态（2026-10-27）**：M1、M2 完成（真实运行：[M1 第 1 次](runs/2026-10-27-canary-m1/README.md)、[M1 第 2 次](runs/2026-10-27-canary-m1-tuned/README.md)、[M2](runs/2026-10-27-canary-m2/README.md)）。`report_finalize` 按审计核对复盘一节（D-21）。M3 已完成代码部分：安全扫描器授权闸门（M3-2，D-22）、本机安装拦截（M3-3/M3-4，D-23）、Skill 的各类目标起点 `references/targets.md`（M3-1、M3-3、M3-4）、`/prelude-kb`（M3-6）、评测驱动的直接对话组（M3-5，D-24）。M3-1 网站第 1 次真实运行（[runs/2026-10-27-web-groupbuy](runs/2026-10-27-web-groupbuy/README.md)）在执行阶段达到 75 分钟上限，未复验、未出报告；暴露的问题已修（D-25、D-26、安装命令重定向解析）。其余 M3 真实运行未做。本机条件：有 Playwright 浏览器缓存和 `adb`，没有安卓模拟器、Windows Sandbox、Docker、ZAP/nuclei。网站可以直接测；安全测试需要一个用户授权 `security-check` 的目标；安卓需要设备或模拟器；Windows 桌面需要 Sandbox 或虚拟机；M3-5 需要一个"同类但不同"的真实目标。成功标准 §0-2 仍未证明。知识库里的 test-pilot 副本不随扩展更新。
+**当前状态（2026-10-27）**：M1、M2 完成（真实运行：[M1 第 1 次](runs/2026-10-27-canary-m1/README.md)、[M1 第 2 次](runs/2026-10-27-canary-m1-tuned/README.md)、[M2](runs/2026-10-27-canary-m2/README.md)）。`report_finalize` 按审计核对复盘一节（D-21）。M3 已完成代码部分：安全扫描器授权闸门（M3-2，D-22）、本机安装拦截（M3-3/M3-4，D-23）、Skill 的各类目标起点 `references/targets.md`（M3-1、M3-3、M3-4）、`/prelude-kb`（M3-6）、评测驱动的直接对话组（M3-5，D-24）。M3-1 网站第 1 次真实运行（[runs/2026-10-27-web-groupbuy](runs/2026-10-27-web-groupbuy/README.md)）在执行阶段达到 75 分钟上限，未复验、未出报告；暴露的问题已修（D-25、D-26、安装命令重定向解析）。其余 M3 真实运行由测试人员按 [m3-guide.md](m3-guide.md) 执行，结果用 `scripts/collect-run.mjs` 交回（D-28）。本机条件：有 Playwright 浏览器缓存和 `adb`，没有安卓模拟器、Windows Sandbox、Docker、ZAP/nuclei。网站可以直接测；安全测试需要一个用户授权 `security-check` 的目标；安卓需要设备或模拟器；Windows 桌面需要 Sandbox 或虚拟机；M3-5 需要一个"同类但不同"的真实目标。成功标准 §0-2 仍未证明。知识库里的 test-pilot 副本不随扩展更新。
 
 - 顺序 M1 → M2 → M3。每个里程碑交付：代码、通过的测试、一份真实运行报告（`docs/runs/<日期>-<名称>/`）。
 - 新决策追加到 §3（D-n，写明理由），与代码放在同一个提交里。

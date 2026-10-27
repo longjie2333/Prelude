@@ -84,4 +84,5 @@ Never：
 
 - 直接在 `main` 上本地提交，交接信息写在 commit message 里。格式为 `type(scope): summary (任务编号)`，type 取 `feat` / `fix` / `refactor` / `test` / `docs` / `style` / `chore`。正文写原因、逐条改动、仍未完成的项（`Not met: …`）。
 - 跨会话的长期状态写在 plan §10 和最新的 `docs/runs/*/README.md` 中，不要只留在对话里。
+- M3 的真实运行由测试人员执行（`docs/m3-guide.md`）。收到 `docs/runs/<名称>/` 后：读 summary 和测试人员记录，对照验收条件，修暴露的问题，更新 plan §10。
 - 命令、目录或约定变了，在同一个提交里更新本文件。

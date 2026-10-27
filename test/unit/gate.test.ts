@@ -185,6 +185,9 @@ describe("host installs (M3-4)", () => {
 			if (d.action === "block") expect(d.reason).toMatch(/Windows Sandbox, a VM or an emulator/);
 		}
 		expect(bash("msiexec /i app.msi", { ...ctx, testMode: false }).action).toBe("allow");
+		// pi running inside a disposable Sandbox/VM, declared by the user (D-27).
+		const vm = { ...ctx, scope: { targets: [], isolated_host: true } };
+		expect(bash("msiexec /i app.msi /qn", vm).action).toBe("allow");
 	});
 
 	it("allows installing on a device and running ordinary programs", () => {

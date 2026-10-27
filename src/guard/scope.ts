@@ -24,6 +24,11 @@ export const ScopeSchema = Type.Object({
 	),
 	limits: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
 	data: Type.Optional(Type.Object({ policy: Type.String() })),
+	/**
+	 * Set by the user when pi itself runs inside a disposable Windows Sandbox or VM: installing the
+	 * program under test is then allowed (D-27). The model can never write scope.json.
+	 */
+	isolated_host: Type.Optional(Type.Boolean()),
 	egress_allowlist: Type.Optional(Type.Array(Type.String())),
 });
 export type Scope = Static<typeof ScopeSchema>;
