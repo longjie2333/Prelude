@@ -13,6 +13,8 @@ import { gateExtension, summarizeInput } from "./guard/extension.ts";
 import type { Ask, GateContext } from "./guard/gate.ts";
 import { addScopeTarget, loadScope } from "./guard/scope.ts";
 import { CANARY_DIR, EXTENSION_DIR, globalPaths, type ProjectPaths, projectPaths } from "./paths.ts";
+import { readConfig } from "./kb/config.ts";
+import { Kb } from "./kb/sync.ts";
 import { Run } from "./run.ts";
 
 export interface PreludeOptions {
@@ -34,6 +36,7 @@ export class Prelude {
 	/** Approvals given in dialogs during this session, by `Ask.subject`. */
 	readonly approved = new Set<string>();
 	private runtime: Promise<ModelRuntime> | undefined;
+	private kbInstance: Kb | undefined;
 
 	constructor(options: PreludeOptions = {}) {
 		this.options = options;
@@ -66,6 +69,25 @@ export class Prelude {
 		return new Run(this.project, this.runId);
 	}
 
+	/** The knowledge base from `~/.prelude/config.json`, or undefined before /prelude-init set it up. */
+	kb(): Kb | undefined {
+		if (this.kbInstance) return this.kbInstance;
+		const config = readConfig(this.home)?.kb;
+		if (!config || !existsSync(join(config.dir, ".git"))) return undefined;
+		this.kbInstance = new Kb(config, (e) => this.audit(e), this.home);
+		return this.kbInstance;
+	}
+
+	setKb(kb: Kb): void {
+		this.kbInstance = kb;
+	}
+
+	requireKb(): Kb {
+		const kb = this.kb();
+		if (!kb) throw new Error("no knowledge base yet; run /prelude-init");
+		return kb;
+	}
+
 	gateContext(): GateContext {
 		const cwd = this.ctx?.cwd ?? process.cwd();
 		const project = projectPaths(cwd);
@@ -74,7 +96,7 @@ export class Prelude {
 			cwd,
 			home: this.home,
 			project,
-			kbDir: globalPaths(this.home).kbDir,
+			kbDir: this.kb()?.dir ?? globalPaths(this.home).kbDir,
 			agentDir: this.agentDir,
 			extensionDir: EXTENSION_DIR,
 			canaryDir: CANARY_DIR,

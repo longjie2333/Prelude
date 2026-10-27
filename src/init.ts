@@ -1,11 +1,14 @@
 /**
  * `/prelude-init`, project part (plan M1-2, design §8): `.prelude/` with `project.json` (random
  * id), `.prelude/.gitignore` from the user's choice about versioning notes and reports, and a
- * marked Prelude section in `AGENTS.md` that re-running replaces in place. The global part
- * (`~/.prelude/`, knowledge base clone) is M2-1.
+ * marked Prelude section in `AGENTS.md` that re-running replaces in place; `runGlobalInit` is
+ * the global part (M2-1).
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { Prelude } from "./context.ts";
+import { readConfig } from "./kb/config.ts";
+import { setupKb } from "./kb/sync.ts";
 import type { ProjectPaths } from "./paths.ts";
 import { nowIso, randomHex, readJson, writeJson } from "./util.ts";
 
@@ -92,4 +95,31 @@ export async function runInit(ctx: ExtensionContext, p: ProjectPaths): Promise<P
 		"info",
 	);
 	return info;
+}
+
+/**
+ * Global part (plan M2-1): `~/.prelude/config.json` and the knowledge base. Asks once for a git
+ * remote; an empty answer, or no UI, gives a local-only knowledge base.
+ */
+export async function runGlobalInit(ctx: ExtensionContext, prelude: Prelude): Promise<void> {
+	const previous = readConfig(prelude.home)?.kb;
+	const remote = previous
+		? previous.remote
+		: ctx.hasUI
+			? (
+					await ctx.ui.input(
+						"Git remote for the shared Prelude knowledge base (empty: local only)",
+						"git@host:team/prelude-kb.git",
+					)
+				)?.trim() || undefined
+			: undefined;
+	const kb = await setupKb(
+		{ home: prelude.home, remote, mainBranch: previous?.mainBranch, branch: previous?.branch },
+		(e) => prelude.audit(e),
+	);
+	prelude.setKb(kb);
+	ctx.ui.notify(
+		`Knowledge base ready at ${kb.dir} (${kb.config.remote ? `branch ${kb.config.branch}, ${kb.state}` : "local only"})`,
+		"info",
+	);
 }

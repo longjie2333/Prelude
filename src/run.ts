@@ -23,6 +23,11 @@ export interface RunState {
 	history: Array<{ phase: Phase; at: string; note?: string }>;
 	report?: { path: string; at: string };
 	notesReminded?: boolean;
+	/** Knowledge-base writes made in this run (retro check, plan M2-8). */
+	kbWrites?: number;
+	/** `kbWrites` at the last successful end sync; settling again pushes only when it differs. */
+	kbSyncedWrites?: number;
+	retroReminded?: boolean;
 }
 
 export interface FrozenFile {

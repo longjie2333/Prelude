@@ -22,7 +22,18 @@ export const SECTIONS = {
 	tested: ["测了什么", "What was tested", "Tested"],
 	untested: ["没测什么", "What was not tested", "Not tested"],
 	isolation: ["隔离级别", "Isolation"],
+	retro: ["复盘", "Retrospective", "Retro"],
 } as const;
+/** Sections every report needs; 复盘 is only required once a knowledge base exists (M2-8). */
+const BASE_SECTIONS: SectionKey[] = [
+	"conclusion",
+	"defects",
+	"suggestions",
+	"unreproduced",
+	"tested",
+	"untested",
+	"isolation",
+];
 export type SectionKey = keyof typeof SECTIONS;
 
 const FINDING_ID = /\bf-\d{3}\b/g;
@@ -67,12 +78,31 @@ export interface ReportCheck {
 }
 
 /** Everything wrong with the report, so the model can fix it in one pass. */
-export function checkReport(markdown: string, findings: Finding[], platform = process.platform): ReportCheck {
+export interface RetroCheck {
+	/** Knowledge-base writes made in this run. */
+	kbWrites: number;
+}
+
+export function checkReport(
+	markdown: string,
+	findings: Finding[],
+	platform = process.platform,
+	retro?: RetroCheck,
+): ReportCheck {
 	const sections = parseSections(markdown);
 	const problems: string[] = [];
-	for (const key of Object.keys(SECTIONS) as SectionKey[]) {
+	for (const key of retro ? [...BASE_SECTIONS, "retro" as const] : BASE_SECTIONS) {
 		if (!sections.has(key)) problems.push(`missing section: ${SECTIONS[key][0]}`);
 	}
+	if (
+		retro &&
+		sections.has("retro") &&
+		retro.kbWrites === 0 &&
+		!/无可沉淀|nothing to (record|keep)/i.test(sections.get("retro") ?? "")
+	)
+		problems.push(
+			"no knowledge-base write in this test: record lessons or tools with kb_* first, or write 无可沉淀 and why under 复盘",
+		);
 	const unverified = findings.filter((f) => !f.verification);
 	if (unverified.length)
 		problems.push(`not verified yet: ${unverified.map((f) => f.id).join(", ")}; call verify_findings`);
@@ -128,15 +158,11 @@ export function createReportFinalizeTool(prelude: Prelude) {
 	return defineTool({
 		name: "report_finalize",
 		label: "Finalize report",
-		description: `Check and register the report of the running Prelude test. The report (Markdown under .prelude/reports/) needs these sections: ${Object.values(
-			SECTIONS,
-		)
-			.map((s) => s[0])
-			.join(
-				"、",
-			)}. Finding ids (f-001) must appear in the section matching their verdict. On problems the call fails with the full list; fix the report and call again.`,
+		description: `Check and register the report of the running Prelude test. The report (Markdown under .prelude/reports/) needs these sections: ${BASE_SECTIONS.map((k) => SECTIONS[k][0]).join("、")}, and 复盘 when a knowledge base exists (kb_* writes made in this test, or 无可沉淀 with the reason). Finding ids (f-001) must appear in the section matching their verdict. On problems the call fails with the full list; fix the report and call again.`,
 		promptSnippet: "Check and register the test report",
-		promptGuidelines: ["Call report_finalize after verify_findings and after writing the report file."],
+		promptGuidelines: [
+			"Call report_finalize last: after verify_findings, after writing the report file, and after the retro (kb_* writes).",
+		],
 		parameters: Type.Object({
 			path: Type.String({ description: "Report path, e.g. .prelude/reports/2026-10-27-order.md" }),
 		}),
@@ -145,7 +171,9 @@ export function createReportFinalizeTool(prelude: Prelude) {
 		async execute(_id, params) {
 			const run = prelude.run();
 			const abs = reportFile(run, params.path);
-			const check = checkReport(readFileSync(abs, "utf8"), run.findings());
+			const state0 = run.state();
+			const retro = prelude.kb() ? { kbWrites: state0.kbWrites ?? 0 } : undefined;
+			const check = checkReport(readFileSync(abs, "utf8"), run.findings(), process.platform, retro);
 			if (check.problems.length) throw new Error(`report not accepted:\n- ${check.problems.join("\n- ")}`);
 
 			const relPath = relative(run.project.root, abs).replace(/\\/g, "/");

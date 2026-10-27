@@ -25,7 +25,7 @@ description: Prelude 测试方法论：从一个测试目标出发，自主完�
 ### 1. 接收（intake）
 
 1. 判断目标类型：网站、接口、安卓 apk、Windows 程序、CLI、服务等，可以同时属于多类。
-2. 读项目的 `.prelude/notes/` 和 `AGENTS.md`，读已有的相关类别经验（如果有）。
+2. 读项目的 `.prelude/notes/` 和 `AGENTS.md`。从测试模式说明里列出的知识库类别中，按维度（平台、接口、业务领域、技术栈）选出最接近的几个，读它们的 `SKILL.md`：经验写明了适用和不适用的条件，按条件判断是否用；`scripts/` 下的工具优先于自己重写。
 3. 能从目标本身拿到的信息先自己拿：接口文档（`/openapi.json`、`/swagger`）、首页、`--help`、README、安装包元数据。
 4. 按 [references/intake.md](references/intake.md) 列出仍然缺少的信息，用 `questionnaire` **一次性**问完。信息已经足够时可以不问。没有 UI 时 `questionnaire` 会失败：按保守的默认值继续（只做功能测试、不做破坏性操作），并把假设写进报告。
 
@@ -72,9 +72,15 @@ description: Prelude 测试方法论：从一个测试目标出发，自主完�
 
 ### 7. 报告（report）
 
-按 [references/report.md](references/report.md) 写到 `.prelude/reports/<日期>-<主题>.md`，然后调用 `report_finalize`。它会检查必需小节，以及每个发现 id 是否放在和复验结论一致的小节里；有问题时会列出全部问题，改好再调用。
+按 [references/report.md](references/report.md) 写到 `.prelude/reports/<日期>-<主题>.md`。先不要调用 `report_finalize`，复盘之后再调用。
 
 ### 8. 复盘（retro）
 
-- 更新 `.prelude/notes/`：这个系统的新事实、坑、环境差异、怎么重置数据。
-- 有知识库工具（`kb_*`）时，按它们的说明写入跨项目通用的经验和工具；经验必须引用本次已复验的发现。没有可沉淀的就明确说明。
+1. 更新 `.prelude/notes/`：这个系统的新事实、坑、环境差异、怎么重置数据。这些只关于这个系统。
+2. 对接收阶段读过的每条经验，判断它这次的表现：
+   - 用上了且又被证实（有 confirmed 的发现支持）→ `kb_lesson_revise`，kind `evidence`。来自第二个项目的证据会让它自动升为已确认。
+   - 在这里不成立或误导了你 → `kb_lesson_revise`，kind `counterexample`，写明这次的条件。经验没有错，是用错了地方，所以补"不适用条件"，不要退役。
+3. 本次有没有**一类系统共有**的新经验：换一个同类系统也成立、能让下次更快找到问题。有，并且有 confirmed 的发现支持，就 `kb_lesson_add`；没有合适的类别才 `kb_category_add`。只在一个系统上成立的事实写进笔记，不进知识库。
+4. 本次写过、用过、换个目标还能用的工具，补好 `README.md`（用法、已知失败）和 `selfcheck.<ext>`（退出码 0 = 可用），用 `kb_tool_add` 入库。
+5. 在报告的"复盘"一节写明做了哪些知识库写入；一条都没有，就写"无可沉淀"和原因。
+6. 调用 `report_finalize`。它检查报告小节、发现与复验结论是否一致，以及复盘是否做了。

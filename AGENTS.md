@@ -44,7 +44,7 @@ node scripts/run-canary.mjs   # 真实模型运行（消耗额度，先征得用
 
 - **工具**：用 `defineTool`，参数是 TypeBox schema；枚举用 `StringEnum`（pi-ai），不用 `Type.Union` 字面量；写文件的工具设 `executionMode: "sequential"`；每条 `promptGuidelines` 都要写出工具名。
 - **错误**：前置条件不满足就 `throw new Error(...)`。闸门 handler 出错一律拦截（fail-closed）。
-- **git**：只在 `src/kb/git.ts` 中调用，命令都带 `-C <kb目录>`；不读取、不保存凭据；冲突必须交给用户选择。
+- **git**：只在 `src/kb/git.ts` 中调用（自己 spawn，`GIT_TERMINAL_PROMPT=0`，D-17），命令都带 `-C <kb目录>`；不读取、不保存凭据；冲突必须交给用户选择。测试用临时 bare 仓库当远程，不连真实远程。
 - **日志**：`src/` 里不用 `console`；需要追溯的事件写 `audit.jsonl`（哈希链），入参只记摘要。
 - **改编官方示例**：文件头写明来源，例如 `Adapted from @earendil-works/pi-coding-agent@1.4.0 examples/extensions/plan-mode/index.ts`。
 - **注释**：文件头写一段职责说明并引用编号（`plan M2-3`、`design §6.2`、`D-5`）；代码内注释只写"为什么"。

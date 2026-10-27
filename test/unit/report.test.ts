@@ -73,6 +73,21 @@ describe("report check (M1-8)", () => {
 		expect(checkReport(report({ 隔离级别: "沙箱" }), findings, "linux").problems).toEqual([]);
 	});
 
+	it("requires a retro once a knowledge base exists (M2-8)", () => {
+		const withRetro = (text: string) => `${report()}
+## 复盘
+
+${text}
+`;
+		expect(checkReport(report(), findings, "win32", { kbWrites: 1 }).problems).toEqual(["missing section: 复盘"]);
+		expect(checkReport(withRetro("写了一条经验"), findings, "win32", { kbWrites: 1 }).problems).toEqual([]);
+		expect(checkReport(withRetro("本次很顺利"), findings, "win32", { kbWrites: 0 }).problems).toEqual([
+			expect.stringMatching(/no knowledge-base write/),
+		]);
+		expect(checkReport(withRetro("无可沉淀：只是配置问题"), findings, "win32", { kbWrites: 0 }).problems).toEqual([]);
+		expect(checkReport(report(), findings, "win32").problems).toEqual([]);
+	});
+
 	it("accepts English and numbered headings and keeps subsections inside their section", () => {
 		const md = "## 1. Conclusion\nok\n## Verified defects\n### f-001 x\n#### detail f-009\n## 2) Suggestions\nf-003";
 		const s = parseSections(md);

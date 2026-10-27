@@ -30,10 +30,14 @@ it("loads from the package root with its tools and commands", async () => {
 	expect(ext).toBeDefined();
 	expect([...(ext?.tools.keys() ?? [])].sort()).toEqual([
 		"finding_record",
+		"kb_category_add",
+		"kb_lesson_add",
+		"kb_lesson_revise",
+		"kb_tool_add",
 		"questionnaire",
 		"report_finalize",
 		"test_progress",
 		"verify_findings",
 	]);
-	expect([...(ext?.commands.keys() ?? [])].sort()).toEqual(["prelude-init", "test"]);
+	expect([...(ext?.commands.keys() ?? [])].sort()).toEqual(["prelude-init", "prelude-sync", "test"]);
 });

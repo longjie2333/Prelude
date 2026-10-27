@@ -41,7 +41,9 @@ export function updateDisplay(prelude: Prelude, ctx: ExtensionContext | undefine
 		const run = prelude.run();
 		const findings = run.findings();
 		ctx.ui.setStatus(STATUS_KEY, ctx.ui.theme.fg("accent", statusText(run.state(), findings)));
-		ctx.ui.setWidget(WIDGET_KEY, findings.length ? widgetLines(findings) : undefined);
+		const kb = prelude.kb();
+		const lines = [...widgetLines(findings), ...(kb?.config.remote ? [`kb: ${kb.state}`] : [])];
+		ctx.ui.setWidget(WIDGET_KEY, lines.length ? lines : undefined);
 	} catch {
 		// Display is best effort: a stale context after session replacement must not fail a tool.
 	}

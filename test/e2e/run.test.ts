@@ -77,6 +77,10 @@ const REPORT = `# canary 测试报告
 ## 隔离级别
 
 仅工具层策略，不是安全边界。
+
+## 复盘
+
+无可沉淀：只有一个缺陷，类别经验需要更多样本。
 `;
 
 let p: TempProject;
@@ -234,7 +238,11 @@ describe("a Prelude test run", () => {
 			expect.arrayContaining(["read", "bash", "edit", "write", "finding_record", "questionnaire"]),
 		);
 		expect(mainSeen?.sections.skills).toContain("test-pilot");
-		expect(mainSeen?.sections.prelude).toContain(TEST_PILOT.replace(/\\/g, "/"));
+		// The first /test created a local knowledge base; the methodology is read from its copy (M2-7).
+		expect(mainSeen?.sections.prelude).toContain(
+			`${p.home.replace(/\\/g, "/")}/.prelude/kb/skills/test-pilot/SKILL.md`,
+		);
+		expect(TEST_PILOT).toContain("test-pilot");
 
 		// Gate blocks and the audit chain (M1 acceptance 4).
 		expect(blocked[0]).toMatch(/scope\.json is maintained by the user only/);

@@ -20,11 +20,11 @@
 | 扩展 | `export default function (pi: ExtensionAPI)`，jiti 直接加载 TS；`package.json` 中 `pi.extensions` | 入口 |
 | 命令 | `pi.registerCommand` / `registerFlag` / `registerShortcut` | `/test`、`/prelude-init`、`/prelude-sync` |
 | 提示词 | `before_agent_start` 中修改 `event.systemPromptOptions.sections.<key>`；修改结果出现在 `session.messages[0].sections`，**不在** `session.systemPrompt` | 测试模式说明 |
-| Skill 路径 | `resources_discover` 返回 `{ skillPaths }` | 挂载知识库 Skill |
+| Skill 路径 | `resources_discover` 返回 `{ skillPaths }`，可以是目录（递归发现其中的 `SKILL.md`）；只在启动和重载时调用，会话中新建的类别下次启动才出现在 `skills` 小节 | 挂载知识库 Skill；测试模式说明里另列类别和路径 |
 | 工具 | `defineTool` / `pi.registerTool`，参数用 TypeBox；枚举用 `StringEnum`（pi-ai）；写文件的工具设 `executionMode: "sequential"`；`promptGuidelines` 每条都要写出工具名 | 写入工具 |
 | 闸门 | `tool_call` 可以修改 input，或返回 `{ block, reason }`；handler 抛错时 fail-closed；codemode / MCP 发起的调用同样会经过 | 安全边界 |
 | UI | `ctx.ui.select / confirm / input / notify / setStatus / setWidget`；`ctx.hasUI`、`ctx.mode`（tui / rpc / json / print） | 冲突询问、进度 |
-| 执行命令 | `pi.exec(command, args, options)` | 调 git |
+| 执行命令 | `pi.exec(command, args, options)`，不能传环境变量；进程起不来时返回 `code: 1` | git 改用自己的 spawn（D-17） |
 | 空闲 | `agent_settled` 表示不会再自动续轮；`agent_end` **不是**最终空闲 | 结束检查与同步 |
 | 子会话 | `createAgentSession({ cwd, modelRuntime, model, tools, customTools, resourceLoader, sessionManager, settingsManager })`，之后 `bindExtensions({})`、`prompt()`、`dispose()`；`ModelRuntime.create({ authPath, modelsPath })` 读同一个 agentDir | 独立审查 |
 | 资源隔离 | `DefaultResourceLoader({ noExtensions, noSkills, noPromptTemplates, noContextFiles, extensionFactories })` | 审查会话不加载用户资源 |
@@ -77,6 +77,11 @@
 | D-13 | `finding_record` 记录时把复现脚本和证据按 sha256 复制进 `evidence/`；复验跑冻结副本；`runs/`、`evidence/` 只经工具写入；代码重跑未复现的缺陷不再交给审查（结论 `not-reproduced`） | 复验的必须是当时记录的东西，模型之后改文件或改 findings.jsonl 都不能影响结论 |
 | D-14 | 复现脚本约定：观察到问题才以非 0 退出；连不上目标、准备失败、意外异常以 0 退出 | 否则任何脚本错误都会被算成"复现"；审查只能兜底，不能依赖 |
 | D-15 | 审查子会话的 token 用量写进审计 `verification` 事件的 `detail.reviewUsage` | 子会话没有会话文件，否则成本对比漏掉审查部分 |
+| D-16 | 复盘在 `report_finalize` 之前：先写报告文件，再用 `kb_*` 写入（证据引用这份报告），最后 `report_finalize`。有知识库时报告必须有"复盘"一节，本次没有任何知识库写入就要写明"无可沉淀"和原因 | 经验的证据要指向本次报告；结束检查要能判断复盘是否做了 |
+| D-17 | git 不经 `pi.exec`，在 `kb/git.ts` 里自己 spawn，设置 `GIT_TERMINAL_PROMPT=0`；没有身份的机器用 `-c user.name/user.email` 提交，不改 git 配置 | `pi.exec` 不能传环境变量，缺凭据时 git 会等一个没人看得到的提示 |
+| D-18 | 结束同步不切换到 main：从自己的分支 `push HEAD:<main>`。进入时已合入 origin/main，所以通常是快进；main 期间变了就先把 origin/main 合进自己的分支，有冲突则只推自己的分支、记待处理标记（`~/.prelude/kb-pending.json`） | 与"合并到 main 再推"效果相同，工作区始终在自己的分支上，不会把未完成的合并留在 main |
+| D-19 | 冲突时生成的 `SKILL.md` 不询问，直接重新生成；"两者都保留"只对经验文件提供（远端版本另存为新 id）；无 UI 时一律中止合并留待下次 | 设计 §6.2；`SKILL.md` 是由经验派生的 |
+| D-20 | 知识库写入工具在 `/test` 期间才激活；第一次 `/test` 没有知识库时自动初始化（无 UI 时为纯本地） | 和 M1 的项目初始化一致：说一句话就能开始 |
 
 ## 4. 代码结构
 
@@ -96,6 +101,7 @@
 │   ├── verify.ts       # verify_findings：复现重跑 + 审查子会话
 │   ├── report.ts       # report_finalize：报告骨架检查、结束检查
 │   ├── kb/
+│   │   ├── config.ts   # ~/.prelude/config.json、分支名
 │   │   ├── git.ts      # 调用 git：fetch / merge / commit / push、冲突识别、工作区校验
 │   │   ├── sync.ts     # 进入与结束时的同步流程、冲突询问
 │   │   ├── lessons.ts  # 经验的 schema、读写、晋升、修订
@@ -204,7 +210,7 @@
 
 ## 10. 交接
 
-**当前状态（2026-10-27）**：M1 完成。两次真实运行：[第 1 次](runs/2026-10-27-canary-m1/README.md)（44.9 分钟，未达成功标准 §0-1）、调整 Skill 与审查提示后的 [第 2 次](runs/2026-10-27-canary-m1-tuned/README.md)（13.9 分钟、processed token 为旧实现第 5 次的 33%，B1/B2/B3 全部复验确认，无误报）。验收 1–3 通过；验收 4 中改 `scope.json`、访问范围外主机两种情形只有 faux e2e 证据（真实运行中模型没有尝试）。每种配置只跑了一次，未测方差。macOS/Linux 的 OS 级隔离尚未接入。下一步：M2。
+**当前状态（2026-10-27）**：M1 完成（真实运行见 [第 1 次](runs/2026-10-27-canary-m1/README.md)、[第 2 次](runs/2026-10-27-canary-m1-tuned/README.md)）。M2-1 至 M2-9 已实现，unit 与 faux e2e 通过（两台"机器"共享一个 bare 远程：A 写入经验，B 读到并以第二个项目的证据把它升为 confirmed；直接写知识库被拦截；冲突询问与"两者都保留"；结束冲突不阻塞）。未完成：M2 的真实运行（验收 1、2 需要真实模型在 canary 上测两次、换项目 id），以及 `skills/test-pilot/` 复盘步骤的真实模型验证。知识库里的 test-pilot 是初始化时的副本，扩展更新后不会自动同步。
 
 - 顺序 M1 → M2 → M3。每个里程碑交付：代码、通过的测试、一份真实运行报告（`docs/runs/<日期>-<名称>/`）。
 - 新决策追加到 §3（D-n，写明理由），与代码放在同一个提交里。

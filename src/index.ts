@@ -1,11 +1,12 @@
 /**
- * Prelude entry (plan §4, M1): registers the gate, test mode, the progress/verify/report tools and
- * the test-pilot Skill. `createPrelude` takes options for tests; the default export is what pi
+ * Prelude entry (plan §4): registers the gate, test mode, the progress/verify/report tools, the
+ * knowledge-base tools, and the Skills (methodology and categories). `createPrelude` takes options for tests; the default export is what pi
  * loads.
  */
 import type { ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import { Prelude, type PreludeOptions } from "./context.ts";
-import { registerMode, TEST_PILOT } from "./mode.ts";
+import { createKbTools } from "./kb/api.ts";
+import { registerMode } from "./mode.ts";
 import { createFindingRecordTool, createTestProgressTool } from "./progress.ts";
 import questionnaire from "./questionnaire.ts";
 import { createReportFinalizeTool } from "./report.ts";
@@ -23,9 +24,8 @@ export function createPrelude(options: PreludeOptions = {}, onCreate?: (p: Prelu
 		pi.registerTool(createFindingRecordTool(prelude));
 		pi.registerTool(createVerifyFindingsTool(prelude));
 		pi.registerTool(createReportFinalizeTool(prelude));
+		for (const tool of createKbTools(prelude)) pi.registerTool(tool);
 		registerMode(pi, prelude);
-		// M1-4: loaded from the extension; M2-7 moves it to the knowledge base.
-		pi.on("resources_discover", () => ({ skillPaths: [TEST_PILOT] }));
 	};
 }
 
