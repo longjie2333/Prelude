@@ -39,5 +39,5 @@ it("loads from the package root with its tools and commands", async () => {
 		"test_progress",
 		"verify_findings",
 	]);
-	expect([...(ext?.commands.keys() ?? [])].sort()).toEqual(["prelude-init", "prelude-sync", "test"]);
+	expect([...(ext?.commands.keys() ?? [])].sort()).toEqual(["prelude-init", "prelude-kb", "prelude-sync", "test"]);
 });

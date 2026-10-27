@@ -83,6 +83,9 @@
 | D-19 | 冲突时生成的 `SKILL.md` 不询问，直接重新生成；"两者都保留"只对经验文件提供（远端版本另存为新 id）；无 UI 时一律中止合并留待下次 | 设计 §6.2；`SKILL.md` 是由经验派生的 |
 | D-20 | 知识库写入工具在 `/test` 期间才激活；第一次 `/test` 没有知识库时自动初始化（无 UI 时为纯本地） | 和 M1 的项目初始化一致：说一句话就能开始 |
 | D-21 | `report_finalize` 拿"复盘"一节和审计里本次的 `kb_write` 记录逐条核对：每次写入都要按 id 或名称写出，提到的经验 id 必须存在，有写入时不能写"无可沉淀"。审计的 `kb_write` 事件带结构化的 `detail.write`（类型、类别、对象） | M2 真实运行中报告写了一条没做过的 `kb_lesson_add`；复盘的内容要以代码记录为准，不能以模型的叙述为准 |
+| D-22 | 安全扫描器（nuclei、ZAP、sqlmap、ffuf、nmap 等，按实际运行的程序名识别，含 `npx`/`python -m`/`docker run` 启动）只在命令写出的每个目标都有 `security-check` 授权时放行；命令里没有目标时拦截。弹窗批准主机不授予 `security-check` | M3-2：授权必须来自用户写的 `scope.json`，并且要能在调用时检查 |
+| D-23 | 测试模式下拦截在本机运行安装程序（`msiexec`、`*.msi/msix/appx`、`*setup*/*install*.exe`、静默安装参数）；`adb install` 不算（装在设备上） | 设计 §9：打包程序只在 Sandbox、虚拟机或模拟器中运行 |
+| D-24 | M3-5 评测的"直接对话"组用同一个驱动 `RUN_BASELINE=1`：同模型、同目标、同 canary，不加载 Prelude，结果从 events.jsonl 人工评分 | 两组只差 Prelude 本身 |
 
 ## 4. 代码结构
 
@@ -108,6 +111,8 @@
 │   │   ├── lessons.ts  # 经验的 schema、读写、晋升、修订
 │   │   ├── tools.ts    # 工具入库（selfcheck）
 │   │   ├── render.ts   # 由 lessons 生成各类别的 SKILL.md
+│   │   ├── inspect.ts  # /prelude-kb：经验列表、长期未证实、疑似重复（M3-6）
+│   │   ├── writes.ts   # 审计中本次的 kb_write，供复盘核对（D-21）
 │   │   └── api.ts      # kb_lesson_add / kb_lesson_revise / kb_tool_add / kb_category_add
 │   ├── guard/          # gate.ts 规则、extension.ts 钩子、scope、路径、命令分析（从旧实现取回后改写）
 │   ├── audit.ts        # 哈希链 JSONL
@@ -211,7 +216,7 @@
 
 ## 10. 交接
 
-**当前状态（2026-10-27）**：M1 完成（[第 1 次](runs/2026-10-27-canary-m1/README.md)、[第 2 次](runs/2026-10-27-canary-m1-tuned/README.md)）。M2 完成，真实运行见 [runs/2026-10-27-canary-m2](runs/2026-10-27-canary-m2/README.md)：两台"机器"、两个项目 id、一个 bare 远程；A 写入 2 条 candidate 经验和 1 个工具并推送，B 读到后以第二个项目的证据把两条都升为 confirmed。验收 1、2 通过；验收 3、4 只有 faux 证据（真实运行中没有直接写入和冲突）。成功标准 §0-2 的"第二次命中更快"未证明：canary 第一次就能找全，B 反而更慢（23.8 对 17.7 分钟），要在 M3-5 用"同类但不同"的目标验证。`report_finalize` 已按审计核对复盘一节（D-21）。未解决：知识库里的 test-pilot 副本不随扩展更新。下一步：M3。
+**当前状态（2026-10-27）**：M1、M2 完成（真实运行：[M1 第 1 次](runs/2026-10-27-canary-m1/README.md)、[M1 第 2 次](runs/2026-10-27-canary-m1-tuned/README.md)、[M2](runs/2026-10-27-canary-m2/README.md)）。`report_finalize` 按审计核对复盘一节（D-21）。M3 已完成代码部分：安全扫描器授权闸门（M3-2，D-22）、本机安装拦截（M3-3/M3-4，D-23）、Skill 的各类目标起点 `references/targets.md`（M3-1、M3-3、M3-4）、`/prelude-kb`（M3-6）、评测驱动的直接对话组（M3-5，D-24）。未完成：M3 的真实运行全部未做。本机条件：有 Playwright 浏览器缓存和 `adb`，没有安卓模拟器、Windows Sandbox、Docker、ZAP/nuclei。网站可以直接测；安全测试需要一个用户授权 `security-check` 的目标；安卓需要设备或模拟器；Windows 桌面需要 Sandbox 或虚拟机；M3-5 需要一个"同类但不同"的真实目标。成功标准 §0-2 仍未证明。知识库里的 test-pilot 副本不随扩展更新。
 
 - 顺序 M1 → M2 → M3。每个里程碑交付：代码、通过的测试、一份真实运行报告（`docs/runs/<日期>-<名称>/`）。
 - 新决策追加到 §3（D-n，写明理由），与代码放在同一个提交里。

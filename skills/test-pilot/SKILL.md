@@ -24,7 +24,7 @@ description: Prelude 测试方法论：从一个测试目标出发，自主完�
 
 ### 1. 接收（intake）
 
-1. 判断目标类型：网站、接口、安卓 apk、Windows 程序、CLI、服务等，可以同时属于多类。
+1. 判断目标类型：网站、接口、安卓 apk、Windows 程序、CLI、服务等，可以同时属于多类。读 [references/targets.md](references/targets.md) 里对应的一节：怎么驱动、证据是什么、安全测试和打包程序的限制。
 2. 读项目的 `.prelude/notes/` 和 `AGENTS.md`。从测试模式说明里列出的知识库类别中，按维度（平台、接口、业务领域、技术栈）选出最接近的几个，读它们的 `SKILL.md`：经验写明了适用和不适用的条件，按条件判断是否用；`scripts/` 下的工具优先于自己重写。
 3. 能从目标本身拿到的信息先自己拿：接口文档（`/openapi.json`、`/swagger`）、首页、`--help`、README、安装包元数据。
 4. 按 [references/intake.md](references/intake.md) 列出仍然缺少的信息，用 `questionnaire` **一次性**问完。信息已经足够时可以不问。没有 UI 时 `questionnaire` 会失败：按保守的默认值继续（只做功能测试、不做破坏性操作），并把假设写进报告。

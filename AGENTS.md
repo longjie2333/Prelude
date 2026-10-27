@@ -35,6 +35,7 @@ npm test             # unit + faux e2e，不调用真实模型
 npm run canary       # 靶场，默认 http://localhost:4100
 node scripts/run-canary.mjs   # 真实模型运行（消耗额度，先征得用户同意）；结果整理进 docs/runs/
                               # 设 PRELUDE_HOME=<临时目录>，不要碰用户真实的 ~/.prelude；RUN_KB_REMOTE=<bare 仓库>
+                              # RUN_BASELINE=1：不加载 Prelude 的对照组（M3-5）
 ```
 
 手动试用：`pi -e <仓库路径>`。在 canary 上做真实运行时，从仓库外的空目录启动 pi（测试模式下闸门对模型隐藏 `canary/`，D-12）。

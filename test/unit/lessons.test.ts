@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { addCategory, addLesson, listLessons, readLesson, reviseLesson, statusFor } from "../../src/kb/lessons.ts";
+import { overview, similarity } from "../../src/kb/inspect.ts";
 import { renderCategory } from "../../src/kb/render.ts";
 import { type TempProject, tempProject } from "../helpers.ts";
 
@@ -106,5 +107,25 @@ describe("render (M2-4)", () => {
 		expect(a.status).toBe("confirmed");
 		expect(listLessons(kb, "rest-api")).toHaveLength(3);
 		expect(existsSync(join(kb, "skills", "rest-api", "SKILL.md"))).toBe(true);
+	});
+});
+
+describe("/prelude-kb overview (M3-6)", () => {
+	it("lists lessons and flags stale ones and likely duplicates", () => {
+		const old = { project: "p-1", report: "r.md", finding: "f-001", at: "2026-01-02" };
+		const a = addLesson(kb, "rest-api", { ...input, title: "并发扣减要检查守恒" }, [ev("p-1")]);
+		const b = addLesson(kb, "rest-api", { ...input, title: "并发扣减要检查守恒关系" }, [ev("p-2")]);
+		const c = addLesson(
+			kb,
+			"rest-api",
+			{ title: "分页要遍历所有页", applies_when: "列表接口分页", guidance: "比对并集与 total" },
+			[old],
+		);
+		const o = overview(kb, new Date("2026-10-27T00:00:00Z"));
+		expect(o.stale).toEqual([`rest-api/${c.id}`]);
+		expect(o.duplicates).toEqual([[`rest-api/${[a.id, b.id].sort()[0]}`, `rest-api/${[a.id, b.id].sort()[1]}`]]);
+		expect(o.text).toContain("rest-api (interface) — 3 lesson(s), 0 tool(s)");
+		expect(o.text).toContain(`${c.id} [candidate] 分页要遍历所有页 — 1 project(s), last 2026-01-02 (stale)`);
+		expect(similarity("abc", "xyz")).toBe(0);
 	});
 });

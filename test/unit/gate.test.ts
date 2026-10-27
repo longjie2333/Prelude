@@ -121,6 +121,84 @@ describe("shell in test mode", () => {
 	});
 });
 
+describe("security scanners (M3-2)", () => {
+	const secure = (c = ctx) => ({
+		...c,
+		scope: {
+			targets: [
+				{ host: "localhost:4100", allowed: ["functional" as const] },
+				{ host: "localhost:8443", allowed: ["functional" as const, "security-check" as const] },
+			],
+		},
+	});
+
+	it("runs only against targets that allow security-check", () => {
+		expect(bash("nuclei -u http://localhost:8443", secure()).action).toBe("allow");
+		expect(bash("zap-baseline.py -t http://localhost:8443/", secure()).action).toBe("allow");
+		const d = bash("sqlmap -u 'http://localhost:4100/products?page=1'", secure());
+		expect(d).toEqual({
+			action: "block",
+			reason: expect.stringMatching(/sqlmap needs security-check for localhost:4100/),
+		});
+		expect(bash("nmap localhost", secure())).toEqual({
+			action: "block",
+			reason: expect.stringMatching(/without a target URL or host:port/),
+		});
+	});
+
+	it("sees scanners behind launchers and paths", () => {
+		for (const cmd of [
+			"npx nuclei -u http://localhost:4100",
+			"python -m sqlmap -u http://localhost:4100/x",
+			"/opt/tools/ffuf -u http://localhost:4100/FUZZ",
+			"TOKEN=x nikto -h http://localhost:4100",
+			"docker run --rm projectdiscovery/nuclei -u http://localhost:4100",
+			"cd .prelude/work && nmap -p 4100 127.0.0.1:4100",
+		])
+			expect(bash(cmd, secure()).action, cmd).toBe("block");
+	});
+
+	it("does not mistake other words for scanners", () => {
+		for (const cmd of [
+			"grep -rn nmap docs/",
+			"cat .prelude/work/zap-notes.md",
+			"node nuclei-like.mjs",
+			"echo hydration",
+		])
+			expect(bash(cmd, secure()).action, cmd).toBe("allow");
+	});
+});
+
+describe("host installs (M3-4)", () => {
+	it("blocks installers on this host during a test", () => {
+		for (const cmd of [
+			"msiexec /i app.msi /qn",
+			"./AppSetup.exe /S",
+			"Start-Process .\\installer.exe",
+			"powershell Add-AppxPackage .\\app.msix",
+			"app.msi",
+			"tool.exe /verysilent",
+		]) {
+			const d = bash(cmd);
+			expect(d.action, cmd).toBe("block");
+			if (d.action === "block") expect(d.reason).toMatch(/Windows Sandbox, a VM or an emulator/);
+		}
+		expect(bash("msiexec /i app.msi", { ...ctx, testMode: false }).action).toBe("allow");
+	});
+
+	it("allows installing on a device and running ordinary programs", () => {
+		for (const cmd of [
+			"adb install -r build/app-debug.apk",
+			"adb -s emulator-5554 install app.apk && adb shell am start -n com.x/.Main",
+			"node .prelude/work/run.mjs",
+			"python -m pip --version",
+			"ls dist/*.msi",
+			"curl -o .prelude/work/setup.exe http://localhost:4100/download",
+		])
+			expect(bash(cmd).action, cmd).toBe("allow");
+	});
+});
+
 describe("command analysis", () => {
 	it("finds redirect targets but not quoted arrows", () => {
 		expect(analyzeCommand('node -e "a => a > 5" > out.txt 2>&1').writeTargets).toEqual(["out.txt"]);

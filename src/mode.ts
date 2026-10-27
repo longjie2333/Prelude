@@ -13,6 +13,7 @@ import { extractHosts } from "./guard/command.ts";
 import { canonicalPath, isInside } from "./guard/paths.ts";
 import { isHostAllowed, loadScope } from "./guard/scope.ts";
 import { runGlobalInit, runInit } from "./init.ts";
+import { overview } from "./kb/inspect.ts";
 import { listCategories, listLessons, skillsDir } from "./kb/lessons.ts";
 import { SKILLS_DIR } from "./paths.ts";
 import { updateDisplay } from "./progress.ts";
@@ -188,6 +189,16 @@ export function registerMode(pi: ExtensionAPI, prelude: Prelude): void {
 			const state = entered === "conflict" || entered === "offline" ? entered : await kb.finish();
 			updateDisplay(prelude);
 			ctx.ui.notify(`Knowledge base: ${state}`, state === "synced" || state === "local" ? "info" : "warning");
+		},
+	});
+
+	pi.registerCommand("prelude-kb", {
+		description: "List knowledge-base categories and lessons, with stale and possibly duplicate lessons",
+		handler: async (_args, ctx) => {
+			prelude.ctx = ctx;
+			const kb = prelude.kb();
+			if (!kb) return ctx.ui.notify("No knowledge base yet; run /prelude-init", "warning");
+			ctx.ui.notify(overview(kb.dir).text, "info");
 		},
 	});
 

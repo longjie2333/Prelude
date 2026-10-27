@@ -11,7 +11,7 @@ import { join } from "node:path";
 import type { ProjectPaths } from "../paths.ts";
 import { analyzeCommand, extractHosts } from "./command.ts";
 import { canonicalPath, isInside } from "./paths.ts";
-import { isHostAllowed, type Scope } from "./scope.ts";
+import { findScopeTarget, isHostAllowed, type Scope } from "./scope.ts";
 
 export interface GateContext {
 	testMode: boolean;
@@ -128,8 +128,30 @@ function evaluateShell(command: string, ctx: GateContext, tool: string): GateDec
 	if (!ctx.testMode) return ALLOW;
 	if (mentionsCanary(command, ctx))
 		return block("the canary is a system under test: test it through its interface, not its source");
+	if (a.hostInstall)
+		return block(
+			`installing ${a.hostInstall} on this host is blocked: run packaged programs in Windows Sandbox, a VM or an emulator (design §9)`,
+		);
+	if (a.scanner) {
+		const denial = scannerDenial(ctx, a.scanner, a.hosts);
+		if (denial) return block(denial);
+	}
 	const asks = scopeAsks(ctx, a.hosts, a.installs);
 	return asks.length ? { action: "ask", asks } : ALLOW;
+}
+
+/**
+ * M3-2: a scanner runs only against targets whose scope entry allows `security-check`, and only
+ * when the command names them, so the check can be made. Approving a host in a dialog never
+ * grants it: D-11 adds approved targets as functional only.
+ */
+function scannerDenial(ctx: GateContext, scanner: string, hosts: string[]): string | undefined {
+	if (hosts.length === 0)
+		return `${scanner} without a target URL or host:port in the command: name the target so its security-check authorization can be checked`;
+	const unauthorized = hosts.filter((h) => !findScopeTarget(ctx.scope, h)?.allowed.includes("security-check"));
+	if (unauthorized.length)
+		return `${scanner} needs security-check for ${unauthorized.join(", ")} in .prelude/scope.json; only the user can grant it. Record it under 没测什么`;
+	return undefined;
 }
 
 export function evaluateToolCall(toolName: string, input: Record<string, unknown>, ctx: GateContext): GateDecision {

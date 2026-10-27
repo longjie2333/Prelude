@@ -17,7 +17,30 @@ export interface CommandAnalysis {
 	hosts: string[];
 	/** Files the command redirects output into (`> file`, `>> file`, `tee file`, `Out-File`). */
 	writeTargets: string[];
+	/** A security scanner or attack tool the command runs (M3-2). */
+	scanner?: string;
+	/** Installs a program on this host (M3-4: packaged programs go to a sandbox, VM or emulator). */
+	hostInstall?: string;
 }
+
+/** Security scanners and attack tools: they need `security-check` in scope.json (M3-2). */
+const SCANNERS =
+	/(?<![\w./-])(nuclei|zap(?:\.sh|\.bat|-cli|-baseline\.py|-full-scan\.py|-api-scan\.py)?|owasp-zap|zaproxy|sqlmap|nikto|nmap|masscan|ffuf|gobuster|feroxbuster|dirb|dirsearch|wfuzz|hydra|medusa|wpscan|arachni|testssl(?:\.sh)?|sslyze|commix|xsstrike|dalfox)(?=\s|$|\.exe)/i;
+
+/** Running an installer on this host. `adb install` is not one: it installs on a device. */
+const HOST_INSTALL: Array<[RegExp, string]> = [
+	[/\bmsiexec(\.exe)?\b/i, "msiexec"],
+	[/\b(Add-AppxPackage|Add-AppPackage)\b/i, "Add-AppxPackage"],
+	[
+		/(^|[;&|]\s*|\bStart-Process\s+|\bstart\s+|&\s*)(["']?)[^\s"';&|]+\.(msi|msix|msixbundle|appx|appxbundle)\2(?=\s|$)/i,
+		"a Windows package",
+	],
+	[
+		/(^|[;&|]\s*|\bStart-Process\s+|\bstart\s+|&\s*)(["']?)[^\s"';&|]*(setup|install)[^\s"';&|\\/]*\.exe\2(?=\s|$)/i,
+		"an installer .exe",
+	],
+	[/\.exe["']?\s+(?:\S+\s+)*(\/S|\/silent|\/verysilent|\/quiet|\/qn)(?=\s|$)/i, "a silent install"],
+];
 
 const DANGEROUS: Array<[RegExp, string]> = [
 	[/\bsudo\b|\bdoas\b|\brunas\b/i, "privilege escalation"],
@@ -148,11 +171,45 @@ function extractWriteTargets(raw: string): string[] {
 	);
 }
 
+function segments(cmd: string): string[] {
+	return cmd.split(/&&|\|\||;|\||\n/).filter((s) => s.trim());
+}
+
+/** Launchers whose next word is the program that actually runs. */
+const LAUNCHER =
+	/^(npx|pnpx|bunx|uvx|pipx\s+run|python3?(\s+-m)?|py(\s+-m)?|node|bash|sh|pwsh|powershell(\s+-\S+)*|&|docker|docker\s+run(\s+-{1,2}\S+)*)$/i;
+
+/** The scanner a segment runs, judged by its program name, not by words in its arguments. */
+function scannerOf(segment: string): string | undefined {
+	const words = segment
+		.trim()
+		.replace(/^(?:[A-Za-z_]\w*=(?:"[^"]*"|'[^']*'|\S*)\s+)+/, "")
+		.split(/\s+/);
+	for (let i = 0; i < words.length && i < 12; i++) {
+		const program =
+			words[i]
+				.replace(/^["']|["']$/g, "")
+				.split(/[\\/]/)
+				.pop() ?? "";
+		const m = program.match(SCANNERS);
+		if (m && m.index === 0 && m[0].length >= program.replace(/\.exe$/i, "").length) return m[1].toLowerCase();
+		// Keep looking only while the words so far are a launcher (`docker run --rm image`, `python -m`).
+		if (!LAUNCHER.test(words.slice(0, i + 1).join(" ")) && !/^projectdiscovery\/|^owasp\/|^zaproxy\//i.test(program))
+			return undefined;
+	}
+	return undefined;
+}
+
 export function analyzeCommand(cmd: string): CommandAnalysis {
 	return {
 		dangerous: DANGEROUS.find(([re]) => re.test(cmd))?.[1],
 		installs: extractInstalls(cmd),
 		hosts: extractHosts(cmd),
 		writeTargets: extractWriteTargets(cmd),
+		scanner: segments(cmd).map(scannerOf).find(Boolean),
+		hostInstall: segments(cmd)
+			.filter((seg) => !/^\s*adb\b/i.test(seg))
+			.map((seg) => HOST_INSTALL.find(([re]) => re.test(seg.trim()))?.[1])
+			.find(Boolean),
 	};
 }

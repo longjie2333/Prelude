@@ -2,7 +2,7 @@
 // the canary on :4100, from an empty temp project outside this repo (D-12).
 //
 //   node scripts/run-canary.mjs      RUN_MODEL=provider/model  RUN_GOAL=<text>  RUN_OUT=<dir>  RUN_MINUTES=60
-//                                    PRELUDE_HOME=<dir>  RUN_KB_REMOTE=<git url>
+//                                    PRELUDE_HOME=<dir>  RUN_KB_REMOTE=<git url>  RUN_BASELINE=1
 //
 // No human in the loop: host/install approvals are blocked; questionnaire dialogs get their first
 // option (the model's own default); the knowledge-base remote prompt gets RUN_KB_REMOTE (empty:
@@ -51,7 +51,11 @@ log(
 );
 
 const started = Date.now();
-const pi = spawn(process.execPath, [CLI, "--mode", "rpc", "--no-session", "-ne", "-e", PKG, "--model", MODEL], {
+// RUN_BASELINE=1 (plan M3-5): the same model, goal and canary without Prelude: the goal is sent as
+// a plain prompt, and the answer is scored by hand from events.jsonl.
+const BASELINE = process.env.RUN_BASELINE === "1";
+const piArgs = ["--mode", "rpc", "--no-session", "-ne", ...(BASELINE ? [] : ["-e", PKG]), "--model", MODEL];
+const pi = spawn(process.execPath, [CLI, ...piArgs], {
 	cwd: ROOT,
 	stdio: ["pipe", "pipe", "pipe"],
 	env: { ...process.env, NODE_NO_WARNINGS: "1" },
@@ -63,7 +67,7 @@ const dialogs = [];
 const usage = { turns: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 const tools = {};
 let settled = false;
-let testStarted = false;
+let testStarted = BASELINE;
 let finish;
 const done = new Promise((r) => {
 	finish = r;
@@ -131,7 +135,7 @@ pi.on("exit", (code) => {
 	finish("exited");
 });
 
-send({ id: "test", type: "prompt", message: `/test ${GOAL}` });
+send({ id: "test", type: "prompt", message: BASELINE ? GOAL : `/test ${GOAL}` });
 const timer = setTimeout(() => finish("deadline"), DEADLINE_MS);
 const reason = await done;
 clearTimeout(timer);
@@ -155,6 +159,7 @@ writeFileSync(
 	JSON.stringify(
 		{
 			model: MODEL,
+			baseline: BASELINE,
 			goal: GOAL,
 			end: reason,
 			settled,
@@ -172,6 +177,6 @@ writeFileSync(
 		2,
 	),
 );
-cpSync(preludeDir, join(OUT, "prelude"), { recursive: true });
+if (existsSync(preludeDir)) cpSync(preludeDir, join(OUT, "prelude"), { recursive: true });
 log(`summary: ${join(OUT, "summary.json")}`);
 process.exit(0);
