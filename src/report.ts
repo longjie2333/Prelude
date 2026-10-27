@@ -9,6 +9,8 @@ import { defineTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { Prelude } from "./context.ts";
 import { canonicalPath, isInside } from "./guard/paths.ts";
+import { lessonExists } from "./kb/lessons.ts";
+import { type KbWriteRecord, kbWritesOf } from "./kb/writes.ts";
 import { updateDisplay } from "./progress.ts";
 import type { Finding, Run } from "./run.ts";
 import { nowIso, textResult } from "./util.ts";
@@ -77,12 +79,55 @@ export interface ReportCheck {
 	unreproduced: string[];
 }
 
-/** Everything wrong with the report, so the model can fix it in one pass. */
 export interface RetroCheck {
-	/** Knowledge-base writes made in this run. */
-	kbWrites: number;
+	/** Knowledge-base writes of this run, from the audit (not from the model). */
+	writes: KbWriteRecord[];
+	lessonExists(id: string): boolean;
 }
 
+const LESSON_ID = /\bles-[0-9a-f]{4}\b/g;
+
+/** Whether `text` names `subject` as a whole token (so `race-probe` is not found in `race-probe-v2`). */
+function mentions(text: string, subject: string): boolean {
+	const esc = subject.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	return new RegExp(`(^|[^A-Za-z0-9_-])${esc}($|[^A-Za-z0-9_-])`).test(text);
+}
+
+/**
+ * The 复盘 section against the audited writes (M2-8): every write is named by its id or name, every
+ * lesson id named exists, and "nothing to keep" is only claimed when nothing was written.
+ */
+export function retroProblems(text: string, retro: RetroCheck): string[] {
+	const problems: string[] = [];
+	const nothing = /无可沉淀|nothing to (record|keep)/i.test(text);
+	if (retro.writes.length === 0) {
+		if (!nothing)
+			problems.push(
+				"no knowledge-base write in this test: record lessons or tools with kb_* first, or write 无可沉淀 and why under 复盘",
+			);
+	} else if (nothing) {
+		problems.push(`复盘 says 无可沉淀, but this test wrote ${retro.writes.length} knowledge-base change(s)`);
+	}
+	const label: Record<KbWriteRecord["kind"], string> = {
+		category: "category",
+		lesson_add: "new lesson",
+		lesson_revise: "revised lesson",
+		tool: "tool",
+	};
+	const missing = new Set<string>();
+	for (const w of retro.writes) {
+		if (!mentions(text, w.subject)) missing.add(`${label[w.kind]} ${w.subject} (${w.category})`);
+	}
+	for (const m of missing) problems.push(`复盘 does not mention ${m}, which this test wrote`);
+	const written = new Set(retro.writes.map((w) => w.subject));
+	for (const id of new Set(text.match(LESSON_ID) ?? [])) {
+		if (!written.has(id) && !retro.lessonExists(id))
+			problems.push(`复盘 names lesson ${id}, which does not exist in the knowledge base`);
+	}
+	return problems;
+}
+
+/** Everything wrong with the report, so the model can fix it in one pass. */
 export function checkReport(
 	markdown: string,
 	findings: Finding[],
@@ -94,15 +139,7 @@ export function checkReport(
 	for (const key of retro ? [...BASE_SECTIONS, "retro" as const] : BASE_SECTIONS) {
 		if (!sections.has(key)) problems.push(`missing section: ${SECTIONS[key][0]}`);
 	}
-	if (
-		retro &&
-		sections.has("retro") &&
-		retro.kbWrites === 0 &&
-		!/无可沉淀|nothing to (record|keep)/i.test(sections.get("retro") ?? "")
-	)
-		problems.push(
-			"no knowledge-base write in this test: record lessons or tools with kb_* first, or write 无可沉淀 and why under 复盘",
-		);
+	if (retro && sections.has("retro")) problems.push(...retroProblems(sections.get("retro") ?? "", retro));
 	const unverified = findings.filter((f) => !f.verification);
 	if (unverified.length)
 		problems.push(`not verified yet: ${unverified.map((f) => f.id).join(", ")}; call verify_findings`);
@@ -158,7 +195,7 @@ export function createReportFinalizeTool(prelude: Prelude) {
 	return defineTool({
 		name: "report_finalize",
 		label: "Finalize report",
-		description: `Check and register the report of the running Prelude test. The report (Markdown under .prelude/reports/) needs these sections: ${BASE_SECTIONS.map((k) => SECTIONS[k][0]).join("、")}, and 复盘 when a knowledge base exists (kb_* writes made in this test, or 无可沉淀 with the reason). Finding ids (f-001) must appear in the section matching their verdict. On problems the call fails with the full list; fix the report and call again.`,
+		description: `Check and register the report of the running Prelude test. The report (Markdown under .prelude/reports/) needs these sections: ${BASE_SECTIONS.map((k) => SECTIONS[k][0]).join("、")}, and 复盘 when a knowledge base exists: it must name every kb_* write of this test by its id or name (category, les-xxxx, tool), as checked against the audit, or say 无可沉淀 with the reason when there were none. Finding ids (f-001) must appear in the section matching their verdict. On problems the call fails with the full list; fix the report and call again.`,
 		promptSnippet: "Check and register the test report",
 		promptGuidelines: [
 			"Call report_finalize last: after verify_findings, after writing the report file, and after the retro (kb_* writes).",
@@ -171,8 +208,13 @@ export function createReportFinalizeTool(prelude: Prelude) {
 		async execute(_id, params) {
 			const run = prelude.run();
 			const abs = reportFile(run, params.path);
-			const state0 = run.state();
-			const retro = prelude.kb() ? { kbWrites: state0.kbWrites ?? 0 } : undefined;
+			const kb = prelude.kb();
+			const retro = kb
+				? {
+						writes: kbWritesOf(run.project.auditFile, run.id),
+						lessonExists: (id: string) => lessonExists(kb.dir, id),
+					}
+				: undefined;
 			const check = checkReport(readFileSync(abs, "utf8"), run.findings(), process.platform, retro);
 			if (check.problems.length) throw new Error(`report not accepted:\n- ${check.problems.join("\n- ")}`);
 

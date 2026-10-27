@@ -26,6 +26,7 @@ import {
 	reviseLesson,
 } from "./lessons.ts";
 import { runSelfcheck, TOOL_NAME, toolProblems } from "./tools.ts";
+import type { KbWriteRecord } from "./writes.ts";
 
 interface Source {
 	run: Run;
@@ -71,13 +72,17 @@ function message(action: string, s: Source, summary: string): string {
 	return `kb: ${action}\n\nProject: ${s.project}\nReport: ${s.report}\nRun: ${s.run.id}\n\n${summary}`;
 }
 
-async function kbWrite(prelude: Prelude, s: Source, action: string, summary: string, change: () => void) {
+/** One knowledge write; `change` returns what it wrote, which the audit records for the retro check. */
+async function kbWrite(prelude: Prelude, s: Source, action: string, summary: string, change: () => KbWriteRecord) {
 	const kb = prelude.requireKb();
-	await kb.write(message(action, s, summary), change);
+	let write: KbWriteRecord | undefined;
+	await kb.write(message(action, s, summary), () => {
+		write = change();
+	});
 	s.run.updateState((st) => {
 		st.kbWrites = (st.kbWrites ?? 0) + 1;
 	});
-	prelude.audit({ event: "kb_write", detail: { action } });
+	prelude.audit({ event: "kb_write", detail: { action, write } });
 }
 
 function lessonText(l: Lesson): string {
@@ -103,9 +108,10 @@ export function createKbTools(prelude: Prelude) {
 		defaultActive: false,
 		async execute(_id, p) {
 			const s = source(prelude, p.report);
-			await kbWrite(prelude, s, `add category ${p.name}`, p.description, () =>
-				addCategory(prelude.requireKb().dir, { name: p.name, dimension: p.dimension, description: p.description }),
-			);
+			await kbWrite(prelude, s, `add category ${p.name}`, p.description, () => {
+				addCategory(prelude.requireKb().dir, { name: p.name, dimension: p.dimension, description: p.description });
+				return { kind: "category", category: p.name, subject: p.name };
+			});
 			return textResult(`Category ${p.name} created.`, { name: p.name });
 		},
 	});
@@ -137,7 +143,9 @@ export function createKbTools(prelude: Prelude) {
 			requireCategory(dir, p.category);
 			let lesson: Lesson | undefined;
 			await kbWrite(prelude, s, `add lesson to ${p.category}`, p.title, () => {
-				lesson = addLesson(dir, p.category, p, evidence);
+				const added = addLesson(dir, p.category, p, evidence);
+				lesson = added;
+				return { kind: "lesson_add", category: p.category, subject: added.id };
 			});
 			return textResult(`Added ${lesson ? lessonText(lesson) : "lesson"} to ${p.category}.`, { id: lesson?.id });
 		},
@@ -195,6 +203,7 @@ export function createKbTools(prelude: Prelude) {
 						reason: p.reason,
 						evidence: ev,
 					});
+				return { kind: "lesson_revise", category: p.category, subject: p.id, revision: p.kind };
 			});
 			return textResult(`Revised ${lesson ? lessonText(lesson) : p.id}.`, { id: p.id, status: lesson?.status });
 		},
@@ -233,6 +242,7 @@ export function createKbTools(prelude: Prelude) {
 			await kbWrite(prelude, s, `add tool ${p.category}/${p.name}`, check.output.split("\n")[0], () => {
 				rmSync(dest, { recursive: true, force: true });
 				cpSync(src, dest, { recursive: true });
+				return { kind: "tool", category: p.category, subject: p.name };
 			});
 			return textResult(`Tool ${p.name} added to ${p.category} (selfcheck passed).`, { path: dest });
 		},

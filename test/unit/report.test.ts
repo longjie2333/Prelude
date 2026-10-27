@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkReport, parseSections } from "../../src/report.ts";
+import { checkReport, parseSections, retroProblems } from "../../src/report.ts";
 import type { Finding, Verdict } from "../../src/run.ts";
 
 const finding = (id: string, kind: Finding["kind"], verdict?: Verdict): Finding => ({
@@ -29,6 +29,8 @@ const report = (over: Partial<Record<string, string>> = {}) => {
 		.map(([k, v]) => `## ${k}\n\n${v}`)
 		.join("\n\n")}\n`;
 };
+
+const lessonAdd = { kind: "lesson_add" as const, category: "rest-api", subject: "les-1a2b" };
 
 const findings = [
 	finding("f-001", "defect", "confirmed"),
@@ -79,13 +81,39 @@ describe("report check (M1-8)", () => {
 
 ${text}
 `;
-		expect(checkReport(report(), findings, "win32", { kbWrites: 1 }).problems).toEqual(["missing section: 复盘"]);
-		expect(checkReport(withRetro("写了一条经验"), findings, "win32", { kbWrites: 1 }).problems).toEqual([]);
-		expect(checkReport(withRetro("本次很顺利"), findings, "win32", { kbWrites: 0 }).problems).toEqual([
+		const none = { writes: [], lessonExists: () => false };
+		const one = { writes: [lessonAdd], lessonExists: () => false };
+		expect(checkReport(report(), findings, "win32", one).problems).toEqual(["missing section: 复盘"]);
+		expect(checkReport(withRetro("新增经验 les-1a2b（rest-api）"), findings, "win32", one).problems).toEqual([]);
+		expect(checkReport(withRetro("本次很顺利"), findings, "win32", none).problems).toEqual([
 			expect.stringMatching(/no knowledge-base write/),
 		]);
-		expect(checkReport(withRetro("无可沉淀：只是配置问题"), findings, "win32", { kbWrites: 0 }).problems).toEqual([]);
+		expect(checkReport(withRetro("无可沉淀：只是配置问题"), findings, "win32", none).problems).toEqual([]);
 		expect(checkReport(report(), findings, "win32").problems).toEqual([]);
+	});
+
+	it("checks the 复盘 section against the audited writes (M2-8)", () => {
+		const writes = [
+			{ kind: "category" as const, category: "rest-api", subject: "rest-api" },
+			lessonAdd,
+			{ kind: "lesson_revise" as const, category: "rest-api", subject: "les-9f00", revision: "evidence" },
+			{ kind: "tool" as const, category: "rest-api", subject: "race-probe" },
+		];
+		const known = new Set(["les-9f00", "les-0007"]);
+		const retro = { writes, lessonExists: (id: string) => known.has(id) };
+		const ok =
+			"新建类别 rest-api；新增 les-1a2b；les-9f00 追加证据；入库工具 race-probe。les-0007 本次不适用，未修订。";
+		expect(retroProblems(ok, retro)).toEqual([]);
+		// A write that the retro leaves out, and a lesson the retro invents.
+		expect(retroProblems("新建类别 rest-api；新增 les-1a2b 和 les-dead；入库工具 race-probe-v2。", retro)).toEqual([
+			"复盘 does not mention revised lesson les-9f00 (rest-api), which this test wrote",
+			"复盘 does not mention tool race-probe (rest-api), which this test wrote",
+			"复盘 names lesson les-dead, which does not exist in the knowledge base",
+		]);
+		// Claiming nothing when something was written.
+		expect(retroProblems(`无可沉淀。${ok}`, retro)).toEqual([
+			"复盘 says 无可沉淀, but this test wrote 4 knowledge-base change(s)",
+		]);
 	});
 
 	it("accepts English and numbered headings and keeps subsections inside their section", () => {

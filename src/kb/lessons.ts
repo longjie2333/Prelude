@@ -138,6 +138,15 @@ export function statusFor(lesson: Pick<Lesson, "status" | "evidence">): Lesson["
 	return new Set(lesson.evidence.map((e) => e.project)).size >= 2 ? "confirmed" : "candidate";
 }
 
+/** Whether any category has lesson `id` (retired ones included). */
+export function lessonExists(kbDir: string, id: string): boolean {
+	const dir = skillsDir(kbDir);
+	if (!existsSync(dir)) return false;
+	return readdirSync(dir, { withFileTypes: true }).some(
+		(d) => d.isDirectory() && existsSync(join(dir, d.name, "lessons", `${id}.json`)),
+	);
+}
+
 export function newLessonId(kbDir: string, category: string): string {
 	for (;;) {
 		const id = `les-${randomHex(2)}`;

@@ -59,6 +59,7 @@ const REPORT = `# 报告
 `;
 
 const R = ".prelude/reports/r.md";
+const withRetro = (text: string) => REPORT.replace("见知识库写入。", text);
 
 let t: TempProject;
 let canary: Awaited<ReturnType<typeof startCanary>>;
@@ -197,20 +198,32 @@ describe("knowledge base across machines (M2)", () => {
 					findings: ["f-001"],
 					report: R,
 				}),
+				// The retro must name what was written; a vague one is rejected (M2-8).
+				(ctx) => {
+					lessonId = ctx.lastToolResult().text.match(/les-[0-9a-f]{4}/)?.[0] ?? "";
+					return call("report_finalize", { path: R })(ctx);
+				},
+				remember((ctx) =>
+					call("write", { path: R, content: withRetro(`新建类别 rest-api；新增经验 ${lessonId}。`) })(ctx),
+				),
 				call("report_finalize", { path: R }),
 				keep,
 			],
 			reviewer: [confirm],
 		});
+		let lessonId = "";
 		await (await session(a, routerA)).prompt(`/test 测 ${canary.url}`);
 
 		expect(results[0]).toMatch(/knowledge base is written through Prelude kb_\* tools only/);
 		expect(results[1]).toMatch(/no category rest-api/);
-		expect(results[2]).toMatch(/Report registered/);
+		expect(results[2]).toMatch(/复盘 does not mention category rest-api/);
+		expect(results[2]).toMatch(/复盘 does not mention new lesson les-[0-9a-f]{4} \(rest-api\)/);
+		expect(results[3]).toMatch(/Report registered/);
 		const lessonsA = listLessons(kbA, "rest-api");
 		expect(lessonsA).toHaveLength(1);
 		expect(lessonsA[0].status).toBe("candidate");
 		const id = lessonsA[0].id;
+		expect(lessonId).toBe(id);
 		// Pushed on settle: the remote main has the lesson (M2 acceptance 1).
 		const onMain = await new Git(t.base).exec(["--git-dir", remote, "ls-tree", "-r", "--name-only", "main"]);
 		expect(onMain.stdout).toContain(`skills/rest-api/lessons/${id}.json`);
@@ -238,6 +251,7 @@ describe("knowledge base across machines (M2)", () => {
 					finding: "f-001",
 					report: R,
 				}),
+				call("write", { path: R, content: withRetro(`经验 ${id} 再次被 f-001 证实，追加证据。`) }),
 				remember(call("report_finalize", { path: R })),
 				keep,
 			],
