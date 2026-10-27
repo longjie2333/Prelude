@@ -267,6 +267,33 @@ describe("a Prelude test run", () => {
 		expect(readFileSync(p.paths.agentsFile, "utf8")).toContain("prelude:begin");
 	});
 
+	it("treats the next id as a new finding and explains any other unknown id", async () => {
+		const results: string[] = [];
+		const keep =
+			(next: Step): Step =>
+			(ctx) => {
+				results.push(ctx.lastToolResult().text);
+				return next(ctx);
+			};
+		const rec = (id: string, title: string): Step =>
+			call("finding_record", { id, title, severity: "low", kind: "suggestion", description: "d" });
+		const router = createRouter(p.base, {
+			main: [
+				rec("f-001", "first"),
+				keep(rec("f-005", "far ahead")),
+				keep(rec("f-001", "first, replaced")),
+				keep(say("ok")),
+			],
+		});
+		session = await mainSession(router);
+		await runCommand(session, `/test ${canary.url}`);
+		const run = new Run(p.paths, prelude?.runId ?? "");
+		expect(results[0]).toBe("Recorded f-001: first");
+		expect(results[1]).toMatch(/no finding f-005; existing: f-001\. Omit id to add a new finding/);
+		expect(results[2]).toBe("Recorded f-001: first, replaced");
+		expect(run.findings().map((f) => [f.id, f.title])).toEqual([["f-001", "first, replaced"]]);
+	});
+
 	it("rejects a report whose defect list disagrees with the verdicts", async () => {
 		const results: string[] = [];
 		const keep: Step = (ctx) => {

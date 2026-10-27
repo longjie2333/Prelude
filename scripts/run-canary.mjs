@@ -29,11 +29,23 @@ const OUT = resolve(process.env.RUN_OUT ?? join(tmpdir(), `prelude-run-${stamp}`
 const ROOT = join(OUT, "project");
 const DEADLINE_MS = Number(process.env.RUN_MINUTES ?? 60) * 60_000;
 
+// RUN_TARGET=<host:port> RUN_ALLOWED=functional,...: test an external system instead of the canary.
+// scope.json is written from these, as the user authorized them; RUN_GOAL is then required.
+const TARGET = process.env.RUN_TARGET;
+const ALLOWED = (process.env.RUN_ALLOWED ?? (TARGET ? "functional" : "functional,load")).split(",");
+if (TARGET && !process.env.RUN_GOAL) throw new Error("RUN_TARGET needs RUN_GOAL");
+// RUN_ALLOW_INSTALL=<regex>: install approvals whose subject matches are answered "Allow this session"
+// (for example the Playwright package a UI test needs); all others are still blocked.
+const ALLOW_INSTALL = process.env.RUN_ALLOW_INSTALL ? new RegExp(process.env.RUN_ALLOW_INSTALL) : undefined;
+
 mkdirSync(join(ROOT, ".prelude"), { recursive: true });
 writeFileSync(
 	join(ROOT, ".prelude", "scope.json"),
 	JSON.stringify(
-		{ project: "canary", targets: [{ host: `localhost:${PORT}`, allowed: ["functional", "load"] }] },
+		{
+			project: TARGET ? "external" : "canary",
+			targets: [{ host: TARGET ?? `localhost:${PORT}`, allowed: ALLOWED }],
+		},
 		null,
 		2,
 	),
@@ -44,10 +56,10 @@ const log = (line) => {
 	appendFileSync(join(OUT, "driver.log"), `${s}\n`);
 };
 
-const canary = createCanary({ bugs: new Set(["B1", "B2", "B3"]) });
-await new Promise((r) => canary.listen(PORT, "127.0.0.1", r));
+const canary = TARGET ? undefined : createCanary({ bugs: new Set(["B1", "B2", "B3"]) });
+if (canary) await new Promise((r) => canary.listen(PORT, "127.0.0.1", r));
 log(
-	`canary :${PORT} (B1,B2,B3); project ${ROOT}; model ${MODEL}; PRELUDE_HOME ${process.env.PRELUDE_HOME ?? "(real home)"}`,
+	`${TARGET ? `target ${TARGET} (${ALLOWED.join(",")})` : `canary :${PORT} (B1,B2,B3)`}; project ${ROOT}; model ${MODEL}; PRELUDE_HOME ${process.env.PRELUDE_HOME ?? "(real home)"}`,
 );
 
 const started = Date.now();
@@ -76,6 +88,9 @@ const done = new Promise((r) => {
 function answer(ev) {
 	const opts = ev.options ?? [];
 	if (ev.method === "select") {
+		const install = String(ev.title ?? "").match(/^Allow install (\S+)\?/);
+		if (install && ALLOW_INSTALL?.test(install[1]) && opts.includes("Allow this session"))
+			return { value: "Allow this session" };
 		const deny = opts.find((o) => o === "Block");
 		if (deny) return { value: deny };
 		return opts.length ? { value: opts[0] } : { cancelled: true };
@@ -142,7 +157,7 @@ clearTimeout(timer);
 const minutes = (Date.now() - started) / 60_000;
 log(`end: ${reason} after ${minutes.toFixed(1)} min`);
 pi.kill();
-await new Promise((r) => canary.close(() => r()));
+if (canary) await new Promise((r) => canary.close(() => r()));
 
 const preludeDir = join(ROOT, ".prelude");
 const audit = existsSync(join(preludeDir, "audit.jsonl"))

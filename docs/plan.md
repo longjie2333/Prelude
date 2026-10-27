@@ -86,6 +86,8 @@
 | D-22 | 安全扫描器（nuclei、ZAP、sqlmap、ffuf、nmap 等，按实际运行的程序名识别，含 `npx`/`python -m`/`docker run` 启动）只在命令写出的每个目标都有 `security-check` 授权时放行；命令里没有目标时拦截。弹窗批准主机不授予 `security-check` | M3-2：授权必须来自用户写的 `scope.json`，并且要能在调用时检查 |
 | D-23 | 测试模式下拦截在本机运行安装程序（`msiexec`、`*.msi/msix/appx`、`*setup*/*install*.exe`、静默安装参数）；`adb install` 不算（装在设备上） | 设计 §9：打包程序只在 Sandbox、虚拟机或模拟器中运行 |
 | D-24 | M3-5 评测的"直接对话"组用同一个驱动 `RUN_BASELINE=1`：同模型、同目标、同 canary，不加载 Prelude，结果从 events.jsonl 人工评分 | 两组只差 Prelude 本身 |
+| D-25 | 测试模式下，没有设超时的 bash / powershell 调用默认 600 秒（在 `tool_call` 中改写入参）；模型自己设的超时不变 | pi 的 shell 工具没有默认超时；真实运行中一个启动了 Chromium 的命令 13 分钟没有返回 |
+| D-26 | `finding_record` 的 `id` 等于下一个编号时按新增处理；其他不存在的 id 报错并列出已有 id | 真实运行中模型用 `id` 给新发现编号，25 次调用失败 11 次；参数名和语义不变，只放宽这一种无歧义的情况 |
 
 ## 4. 代码结构
 
@@ -216,7 +218,7 @@
 
 ## 10. 交接
 
-**当前状态（2026-10-27）**：M1、M2 完成（真实运行：[M1 第 1 次](runs/2026-10-27-canary-m1/README.md)、[M1 第 2 次](runs/2026-10-27-canary-m1-tuned/README.md)、[M2](runs/2026-10-27-canary-m2/README.md)）。`report_finalize` 按审计核对复盘一节（D-21）。M3 已完成代码部分：安全扫描器授权闸门（M3-2，D-22）、本机安装拦截（M3-3/M3-4，D-23）、Skill 的各类目标起点 `references/targets.md`（M3-1、M3-3、M3-4）、`/prelude-kb`（M3-6）、评测驱动的直接对话组（M3-5，D-24）。未完成：M3 的真实运行全部未做。本机条件：有 Playwright 浏览器缓存和 `adb`，没有安卓模拟器、Windows Sandbox、Docker、ZAP/nuclei。网站可以直接测；安全测试需要一个用户授权 `security-check` 的目标；安卓需要设备或模拟器；Windows 桌面需要 Sandbox 或虚拟机；M3-5 需要一个"同类但不同"的真实目标。成功标准 §0-2 仍未证明。知识库里的 test-pilot 副本不随扩展更新。
+**当前状态（2026-10-27）**：M1、M2 完成（真实运行：[M1 第 1 次](runs/2026-10-27-canary-m1/README.md)、[M1 第 2 次](runs/2026-10-27-canary-m1-tuned/README.md)、[M2](runs/2026-10-27-canary-m2/README.md)）。`report_finalize` 按审计核对复盘一节（D-21）。M3 已完成代码部分：安全扫描器授权闸门（M3-2，D-22）、本机安装拦截（M3-3/M3-4，D-23）、Skill 的各类目标起点 `references/targets.md`（M3-1、M3-3、M3-4）、`/prelude-kb`（M3-6）、评测驱动的直接对话组（M3-5，D-24）。M3-1 网站第 1 次真实运行（[runs/2026-10-27-web-groupbuy](runs/2026-10-27-web-groupbuy/README.md)）在执行阶段达到 75 分钟上限，未复验、未出报告；暴露的问题已修（D-25、D-26、安装命令重定向解析）。其余 M3 真实运行未做。本机条件：有 Playwright 浏览器缓存和 `adb`，没有安卓模拟器、Windows Sandbox、Docker、ZAP/nuclei。网站可以直接测；安全测试需要一个用户授权 `security-check` 的目标；安卓需要设备或模拟器；Windows 桌面需要 Sandbox 或虚拟机；M3-5 需要一个"同类但不同"的真实目标。成功标准 §0-2 仍未证明。知识库里的 test-pilot 副本不随扩展更新。
 
 - 顺序 M1 → M2 → M3。每个里程碑交付：代码、通过的测试、一份真实运行报告（`docs/runs/<日期>-<名称>/`）。
 - 新决策追加到 §3（D-n，写明理由），与代码放在同一个提交里。

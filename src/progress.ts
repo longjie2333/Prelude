@@ -107,14 +107,25 @@ export function createFindingRecordTool(prelude: Prelude) {
 			evidence: Type.Optional(
 				Type.Array(Type.String(), { description: "Paths of evidence files (responses, logs, screenshots)" }),
 			),
-			id: Type.Optional(Type.String({ description: "Replace this unverified finding instead of adding one" })),
+			id: Type.Optional(
+				Type.String({
+					description: "Only to replace an existing unverified finding; omit it for a new one (ids are assigned)",
+				}),
+			),
 		}),
 		executionMode: "sequential",
 		defaultActive: false,
 		async execute(_id, params) {
 			const run = prelude.run();
 			let f: Finding;
-			if (params.id) {
+			// A real run passed the id it expected the new finding to get (f-002 for the second one)
+			// and failed 11 times on "no finding f-002". That id is the next one: add it.
+			const existing = run.findings().map((x) => x.id);
+			if (params.id && !existing.includes(params.id) && params.id !== run.nextFindingId())
+				throw new Error(
+					`no finding ${params.id}; existing: ${existing.join(", ") || "none"}. Omit id to add a new finding; pass an existing id only to replace it`,
+				);
+			if (params.id && existing.includes(params.id)) {
 				const old = run.finding(params.id);
 				if (old.verification) throw new Error(`${params.id} is already verified; record a new finding instead`);
 				if (params.kind === "defect" && !params.repro) throw new Error("a defect needs a repro script");

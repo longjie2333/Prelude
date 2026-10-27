@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { analyzeCommand, extractHosts } from "../../src/guard/command.ts";
+import { capShellTimeout, DEFAULT_SHELL_TIMEOUT_S } from "../../src/guard/extension.ts";
 import { evaluateToolCall, type GateContext } from "../../src/guard/gate.ts";
 import { isHostAllowed } from "../../src/guard/scope.ts";
 import { CANARY_DIR, EXTENSION_DIR, globalPaths, projectPaths } from "../../src/paths.ts";
@@ -210,6 +211,9 @@ describe("command analysis", () => {
 		expect(analyzeCommand("pip install requests==2.0 httpx").installs).toEqual(["pip:requests==2.0", "pip:httpx"]);
 		expect(analyzeCommand("npm install --save-dev vitest@4").installs).toEqual(["npm:vitest@4"]);
 		expect(analyzeCommand("npm ci").installs).toEqual(["npm:(project dependencies)"]);
+		// Real run: `2>&1` after the package was taken for a second package.
+		expect(analyzeCommand("npm install playwright 2>&1 | tail -5").installs).toEqual(["npm:playwright"]);
+		expect(analyzeCommand("pip install httpx > .prelude/work/pip.log").installs).toEqual(["pip:httpx"]);
 	});
 
 	it("matches loopback aliases and wildcard subdomains", () => {
@@ -217,5 +221,19 @@ describe("command analysis", () => {
 		expect(isHostAllowed(scope, "api.example.com")).toBe(true);
 		expect(isHostAllowed(scope, "example.org")).toBe(false);
 		expect(isHostAllowed({ targets: [{ host: "localhost:4100", allowed: [] }] }, "[::1]:4100")).toBe(true);
+	});
+});
+
+describe("shell timeout in test mode (D-25)", () => {
+	it("gives shell calls without a timeout a default, and keeps one the model set", () => {
+		const a: Record<string, unknown> = { command: "chrome.exe --version" };
+		capShellTimeout("bash", a);
+		expect(a.timeout).toBe(DEFAULT_SHELL_TIMEOUT_S);
+		const b: Record<string, unknown> = { command: "npx playwright test", timeout: 1800 };
+		capShellTimeout("powershell", b);
+		expect(b.timeout).toBe(1800);
+		const c: Record<string, unknown> = { path: "x" };
+		capShellTimeout("read", c);
+		expect(c.timeout).toBeUndefined();
 	});
 });

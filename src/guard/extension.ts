@@ -18,6 +18,19 @@ export interface GateHost {
 	audit(event: AuditEvent): void;
 }
 
+/** Seconds a test-mode shell call may run when the model sets no timeout (D-25). */
+export const DEFAULT_SHELL_TIMEOUT_S = 600;
+
+/**
+ * pi's bash/powershell have no default timeout. In a real run a command that started a GUI
+ * program (Chromium) never returned and stalled the test for 13 minutes; a default bounds that
+ * without limiting calls that ask for longer.
+ */
+export function capShellTimeout(toolName: string, input: Record<string, unknown>): void {
+	if (toolName !== "bash" && toolName !== "powershell") return;
+	if (input.timeout === undefined) input.timeout = DEFAULT_SHELL_TIMEOUT_S;
+}
+
 export function gateExtension(host: GateHost): ExtensionFactory {
 	return (pi: ExtensionAPI) => {
 		pi.on("tool_call", async (event) => {
@@ -44,9 +57,11 @@ export function gateExtension(host: GateHost): ExtensionFactory {
 						return { block: true, reason: denied };
 					}
 					record("allow", `approved: ${subjects}`);
+					if (testMode) capShellTimeout(event.toolName, input);
 					return undefined;
 				}
 				record("allow");
+				if (testMode) capShellTimeout(event.toolName, input);
 				return undefined;
 			} catch (err) {
 				const reason = `Prelude gate error (fail-closed): ${errorMessage(err)}`;

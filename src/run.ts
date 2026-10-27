@@ -116,11 +116,15 @@ export class Run {
 		writeJsonl(this.paths.findingsFile, findings);
 	}
 
+	nextFindingId(): string {
+		return `f-${String(this.findings().length + 1).padStart(3, "0")}`;
+	}
+
 	addFinding(
 		input: Omit<Finding, "id" | "at" | "repro" | "evidence"> & { repro?: string; evidence?: string[] },
 	): Finding {
 		const findings = this.findings();
-		const id = `f-${String(findings.length + 1).padStart(3, "0")}`;
+		const id = this.nextFindingId();
 		if (input.kind === "defect" && !input.repro)
 			throw new Error("a defect needs a repro script (exit code non-zero = reproduced)");
 		const finding: Finding = {

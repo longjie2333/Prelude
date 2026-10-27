@@ -89,11 +89,13 @@ const INSTALLS: Array<{ manager: string; re: RegExp; first?: boolean }> = [
 ];
 
 function packagesOf(rest: string, first: boolean): string[] {
-	// `KEY=value` is an env assignment, `requests==2.0` a pinned package.
-	const words = rest
-		.trim()
-		.split(/\s+/)
-		.filter((w) => w && !w.startsWith("-") && !/^[A-Za-z_]\w*=(?!=)/.test(w));
+	// `KEY=value` is an env assignment, `requests==2.0` a pinned package. A redirect (`2>&1`,
+	// `> log`) ends the argument list: a real run read `2>` as a second package and blocked it.
+	const words: string[] = [];
+	for (const w of rest.trim().split(/\s+/)) {
+		if (/^\d*[<>]/.test(w)) break;
+		if (w && !w.startsWith("-") && !/^[A-Za-z_]\w*=(?!=)/.test(w)) words.push(w);
+	}
 	return first ? words.slice(0, 1) : words;
 }
 
